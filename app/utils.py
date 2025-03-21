@@ -36,27 +36,30 @@ def load_questions_from_csv():
                 logger.error(f"File not found: {file_path}")
                 return
         
-        # Load questions with duplicate column handling - only use the first occurrence of each column name
-        questions_df = pd.read_csv(questions_file, low_memory=False, 
-                                   dtype={'question_id': int})
+        # Load questions with more explicit handling of duplicate columns and NA values
+        # Read CSV without enforcing data types first
+        questions_df = pd.read_csv(questions_file, low_memory=False)
         
-        # Check for duplicate columns (specifically question_id)
-        if list(questions_df.columns).count('question_id') > 1:
-            logger.warning("Duplicate 'question_id' columns found in CSV. Using only the first occurrence.")
-            
-            # Get all column names
-            all_cols = list(questions_df.columns)
-            
-            # Keep only the first occurrence of each column name
-            unique_cols = []
-            seen_cols = set()
-            for col in all_cols:
-                if col not in seen_cols:
-                    unique_cols.append(col)
-                    seen_cols.add(col)
-            
-            # Select only the unique columns
-            questions_df = questions_df[unique_cols]
+        # Fix duplicate columns by renaming them
+        cols = questions_df.columns.tolist()
+        new_cols = []
+        seen = set()
+        
+        for i, col in enumerate(cols):
+            if col in seen:
+                # Add suffix to make unique
+                new_name = f"{col}_{i}"
+                new_cols.append(new_name)
+            else:
+                new_cols.append(col)
+                seen.add(col)
+        
+        # Rename columns to unique names
+        questions_df.columns = new_cols
+        
+        # Now extract the data we need
+        # Use only the first question_id column and handle NA values
+        questions_df['question_id'] = pd.to_numeric(questions_df['question_id'], errors='coerce').fillna(0).astype(int)
         
         # Load answers
         correct_answers_df = pd.read_csv(correct_answers_file, low_memory=False)
@@ -64,7 +67,12 @@ def load_questions_from_csv():
         
         # Process each question
         for _, row in questions_df.iterrows():
-            question_id = row['question_id']
+            question_id = int(row['question_id'])
+            
+            # Skip questions with invalid IDs
+            if question_id <= 0:
+                continue
+                
             question_text = row['question_text']
             main_area = row.get('main_area', 'General')
             sub_area = row.get('sub_area', '')
@@ -83,6 +91,10 @@ def load_questions_from_csv():
             for text in incorrect_options:
                 options.append({"text": text, "is_correct": False})
             
+            # Skip questions with no options
+            if not options:
+                continue
+                
             # Shuffle options
             random.shuffle(options)
             
