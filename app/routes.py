@@ -8,6 +8,7 @@ import time
 import json
 import functools
 from datetime import datetime
+import uuid
 
 from . import crud, schemas, models
 from .database import get_db
@@ -102,6 +103,7 @@ def get_user_state_endpoint(phone_number: str):
 
 @router.get("/webhook")
 async def verify_webhook(
+    request: Request,
     hub_mode: str = Query(..., alias="hub.mode"),
     hub_verify_token: str = Query(..., alias="hub.verify_token"),
     hub_challenge: str = Query(..., alias="hub.challenge")
@@ -110,12 +112,21 @@ async def verify_webhook(
     Handle the webhook verification request from WhatsApp Cloud API.
     This is required when setting up the webhook in the Meta Developer Portal.
     """
+    # Log full request details
+    logger.info(f"Webhook verification request received")
+    logger.info(f"Request URL: {request.url}")
+    logger.info(f"Request method: {request.method}")
+    logger.info(f"Request headers: {dict(request.headers)}")
+    logger.info(f"Query params - hub.mode: {hub_mode}, hub.verify_token: {hub_verify_token}, hub.challenge: {hub_challenge}")
+    
     # Verify the webhook
     challenge = whatsapp_client.verify_webhook(hub_mode, hub_verify_token, hub_challenge)
     
     if challenge:
+        logger.info(f"Webhook verification successful, returning challenge: {challenge}")
         return int(challenge)
     
+    logger.error(f"Webhook verification failed - Incorrect verification token")
     raise HTTPException(status_code=403, detail="Verification failed")
 
 @router.post("/webhook")
@@ -128,14 +139,20 @@ async def whatsapp_webhook(
 ):
     """
     Webhook for WhatsApp messages.
-    This endpoint receives messages from WhatsApp and processes them.
     """
-    # Log request information
+    if not request_id:
+        request_id = str(uuid.uuid4())
+    
+    # Log detailed request information
     logger.info(f"[{request_id}] Webhook request received - Method: {request.method}, Path: {request.url.path}")
-    logger.info(f"[{request_id}] Headers: {dict(request.headers)}")
+    logger.info(f"[{request_id}] Request headers: {dict(request.headers)}")
     
     try:
-        # Get the JSON payload
+        # Get raw request body first for debugging
+        raw_body = await request.body()
+        logger.info(f"[{request_id}] Raw request body: {raw_body}")
+        
+        # Parse as JSON for normal processing
         payload = await request.json()
         logger.info(f"[{request_id}] Received webhook payload: {json.dumps(payload)}")
         

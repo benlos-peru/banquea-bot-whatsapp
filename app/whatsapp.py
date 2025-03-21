@@ -334,11 +334,22 @@ class WhatsAppClient:
         Returns:
             str: The challenge string if verification passes, None otherwise
         """
+        logger.info("Starting webhook verification...")
+        logger.info(f"Received parameters - mode: {mode}, token: [REDACTED], challenge: {challenge}")
+        logger.info(f"Expected verify_token: [REDACTED] (first 3 chars: {self.verify_token[:3] if self.verify_token else 'None'})")
+        
         if mode == "subscribe" and token == self.verify_token:
-            logger.info("WEBHOOK_VERIFIED")
+            logger.info("WEBHOOK_VERIFIED: Mode and token match")
             return challenge
         
-        logger.warning("Webhook verification failed")
+        # Log specific verification failure reason
+        if mode != "subscribe":
+            logger.warning(f"Webhook verification failed: Mode '{mode}' is not 'subscribe'")
+        elif token != self.verify_token:
+            logger.warning("Webhook verification failed: Token mismatch")
+        else:
+            logger.warning("Webhook verification failed: Unknown reason")
+        
         return None
     
     def process_webhook_payload(self, payload: Dict[str, Any]) -> Dict[str, Any]:
