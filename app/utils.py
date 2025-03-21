@@ -36,8 +36,29 @@ def load_questions_from_csv():
                 logger.error(f"File not found: {file_path}")
                 return
         
-        # Load questions
-        questions_df = pd.read_csv(questions_file, low_memory=False)
+        # Load questions with duplicate column handling - only use the first occurrence of each column name
+        questions_df = pd.read_csv(questions_file, low_memory=False, 
+                                   dtype={'question_id': int})
+        
+        # Check for duplicate columns (specifically question_id)
+        if list(questions_df.columns).count('question_id') > 1:
+            logger.warning("Duplicate 'question_id' columns found in CSV. Using only the first occurrence.")
+            
+            # Get all column names
+            all_cols = list(questions_df.columns)
+            
+            # Keep only the first occurrence of each column name
+            unique_cols = []
+            seen_cols = set()
+            for col in all_cols:
+                if col not in seen_cols:
+                    unique_cols.append(col)
+                    seen_cols.add(col)
+            
+            # Select only the unique columns
+            questions_df = questions_df[unique_cols]
+        
+        # Load answers
         correct_answers_df = pd.read_csv(correct_answers_file, low_memory=False)
         incorrect_answers_df = pd.read_csv(incorrect_answers_file, low_memory=False)
         
@@ -78,6 +99,9 @@ def load_questions_from_csv():
         
     except Exception as e:
         logger.error(f"Error loading questions: {str(e)}")
+        # Add more detailed error information
+        import traceback
+        logger.error(traceback.format_exc())
 
 def get_random_question() -> Optional[Dict[str, Any]]:
     """
