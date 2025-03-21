@@ -17,7 +17,7 @@ class WhatsAppClient:
         # WhatsApp Business Account ID
         self.waba_id = os.getenv("WHATSAPP_BUSINESS_ACCOUNT_ID", "")
         # Base URL for the WhatsApp Cloud API
-        self.api_url = "https://graph.facebook.com/v18.0"
+        self.api_url = "https://graph.facebook.com/v22.0"
         # Access token
         self.access_token = os.getenv("WHATSAPP_ACCESS_TOKEN", "")
         # Verify token for webhook
