@@ -75,14 +75,8 @@ async def startup_event():
         # Test connection to Meta APIs
         test_meta_api_connection()
         
-        # Create a database session
-        db = SessionLocal()
-        
-        # Load questions from CSV files if they don't exist
-        load_questions_from_csv(db)
-        
-        # Close the database session
-        db.close()
+        # Load questions from CSV files into memory
+        load_questions_from_csv()
         
         # Start the scheduler for sending questions
         scheduler = start_scheduler()

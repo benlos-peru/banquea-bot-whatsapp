@@ -3,130 +3,117 @@ import random
 import os
 import logging
 from sqlalchemy.orm import Session
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict, Tuple, Optional, Any
 import datetime
 
-from .models import Question, QuestionOption, User, UserResponse
+from .models import User, UserResponse
 from .whatsapp import WhatsAppClient
 
 logger = logging.getLogger(__name__)
 
-def load_questions_from_csv(db: Session):
+# Global in-memory questions store
+questions_store = {}
+
+def load_questions_from_csv():
     """
-    Load questions and answers from CSV files.
+    Load questions and answers from CSV files into memory.
     Should be called when initializing the application.
     """
+    global questions_store
+    
     try:
-        # Check if questions already exist in the database
-        existing_count = db.query(Question).count()
-        if existing_count > 0:
-            logger.info(f"Database already contains {existing_count} questions. Skipping import.")
-            return
+        # Clear existing questions if any
+        questions_store.clear()
         
         # Load the questions
         questions_file = os.path.join('preguntas', 'preguntas.csv')
+        correct_answers_file = os.path.join('preguntas', 'respuestas_correctas.csv')
+        incorrect_answers_file = os.path.join('preguntas', 'respuestas_incorrectas.csv')
         
-        # Check if file exists
-        if not os.path.exists(questions_file):
-            logger.error("Question file not found. Please check the path.")
-            return
+        # Check if files exist
+        for file_path in [questions_file, correct_answers_file, incorrect_answers_file]:
+            if not os.path.exists(file_path):
+                logger.error(f"File not found: {file_path}")
+                return
         
-        # Load questions - handle duplicate column names by using only the first occurrence
+        # Load questions
         questions_df = pd.read_csv(questions_file, low_memory=False)
+        correct_answers_df = pd.read_csv(correct_answers_file, low_memory=False)
+        incorrect_answers_df = pd.read_csv(incorrect_answers_file, low_memory=False)
         
         # Process each question
         for _, row in questions_df.iterrows():
             question_id = row['question_id']
             question_text = row['question_text']
-            correct_answer = row['correct_answer_text']
             main_area = row.get('main_area', 'General')
             sub_area = row.get('sub_area', '')
             
-            # Create the question
-            db_question = Question(
-                id=question_id,
-                text=question_text,
-                area=main_area,
-                sub_area=sub_area
-            )
-            db.add(db_question)
+            # Get correct answers for this question
+            correct_options = correct_answers_df[correct_answers_df['question_id'] == question_id]['answer_text'].tolist()
             
-            # Add correct option
-            db_option = QuestionOption(
-                question_id=question_id,
-                text=correct_answer,
-                is_correct=True
-            )
-            db.add(db_option)
+            # Get incorrect answers for this question
+            incorrect_options = incorrect_answers_df[incorrect_answers_df['question_id'] == question_id]['answer_text'].tolist()
             
-            # Add incorrect options if available
-            # In this new format, we would need to parse them from elsewhere
-            # This is a placeholder for now
+            # Create options list
+            options = []
+            for text in correct_options:
+                options.append({"text": text, "is_correct": True})
+            
+            for text in incorrect_options:
+                options.append({"text": text, "is_correct": False})
+            
+            # Shuffle options
+            random.shuffle(options)
+            
+            # Store question with its options
+            questions_store[question_id] = {
+                "id": question_id,
+                "text": question_text,
+                "area": main_area,
+                "sub_area": sub_area,
+                "options": options
+            }
         
-        # Commit changes
-        db.commit()
-        logger.info(f"Successfully imported {questions_df.shape[0]} questions")
+        logger.info(f"Successfully loaded {len(questions_store)} questions into memory")
         
     except Exception as e:
-        db.rollback()
-        logger.error(f"Error importing questions: {str(e)}")
+        logger.error(f"Error loading questions: {str(e)}")
 
-def get_random_question(db: Session) -> Optional[Tuple[Question, List[QuestionOption]]]:
+def get_random_question() -> Optional[Dict[str, Any]]:
     """
-    Get a random question with its options.
+    Get a random question with its options from the in-memory store.
     
-    Args:
-        db: Database session
-        
     Returns:
-        Tuple of (Question, List[QuestionOption]) or None if no questions exist
+        Dictionary containing question information or None if no questions exist
     """
-    try:
-        # Get count of questions
-        question_count = db.query(Question).count()
-        if question_count == 0:
-            return None
-        
-        # Get a random question
-        random_id = random.randint(1, question_count)
-        question = db.query(Question).filter(Question.id == random_id).first()
-        
-        # If not found, get any question
-        if not question:
-            question = db.query(Question).first()
-        
-        # Get options for this question
-        options = db.query(QuestionOption).filter(QuestionOption.question_id == question.id).all()
-        
-        return question, options
-    
-    except Exception as e:
-        logger.error(f"Error getting random question: {str(e)}")
+    if not questions_store:
         return None
+    
+    # Get a random question
+    question_id = random.choice(list(questions_store.keys()))
+    return questions_store[question_id]
 
-def format_question_message(question: Question, options: List[QuestionOption]) -> str:
+def format_question_message(question: Dict[str, Any]) -> str:
     """
-    Format a question and its options as a WhatsApp message.
+    Format a question into a message string.
     
     Args:
-        question: The question object
-        options: List of option objects
+        question: Question dictionary
         
     Returns:
-        str: Formatted message
+        Formatted message string
     """
-    # Shuffle options
-    random.shuffle(options)
+    options_text = []
+    for i, option in enumerate(question["options"]):
+        options_text.append(f"{i+1}) {option['text']}")
     
-    # Format message
-    message = f"*PREGUNTA MÉDICA SEMANAL*\n\n{question.text}\n\n"
+    formatted_message = (
+        f"Pregunta: {question['text']}\n\n"
+        f"{'\n'.join(options_text)}\n\n"
+        f"Responde con el número de la alternativa correcta."
+    )
     
-    for i, option in enumerate(options):
-        message += f"{i+1}. {option.text}\n"
-    
-    message += "\nResponde con el número de la alternativa que consideres correcta."
-    
-    return message
+    return formatted_message
 
 async def send_scheduled_questions(db: Session, whatsapp_client: WhatsAppClient):
     """
@@ -155,22 +142,25 @@ async def send_scheduled_questions(db: Session, whatsapp_client: WhatsAppClient)
                     continue
             
             # Get a random question
-            question_data = get_random_question(db)
+            question_data = get_random_question()
             if not question_data:
                 logger.error("No questions available in the database")
                 continue
                 
-            question, options = question_data
+            question = question_data
             
-            # Format message
-            message = format_question_message(question, options)
-            
-            # Send message
-            success = await whatsapp_client.send_message(user.phone_number, message)
+            # Send question as interactive list
+            success = await whatsapp_client.send_question_list_message(
+                user.phone_number,
+                question["text"],
+                question["options"],
+                question["id"]
+            )
             
             if success:
-                # Update last message sent time
+                # Update last message sent time and question ID
                 user.last_message_sent = datetime.datetime.utcnow()
+                user.last_question_id = question["id"]
                 db.commit()
                 logger.info(f"Successfully sent question to user {user.phone_number}")
             else:
@@ -206,11 +196,11 @@ def process_user_response(db: Session, user_id: int, response_text: str) -> Tupl
         
         # Get a random question for demonstration
         # In a real implementation, we would track which question was sent to the user
-        question_data = get_random_question(db)
-        if not question_data:
+        question = get_random_question()
+        if not question:
             return False, "Lo sentimos, ha ocurrido un error. Inténtalo de nuevo más tarde."
-            
-        question, options = question_data
+        
+        options = question["options"]
         
         # Check if the selected option number is valid
         if selected_option_num < 1 or selected_option_num > len(options):
@@ -219,27 +209,88 @@ def process_user_response(db: Session, user_id: int, response_text: str) -> Tupl
         # Get the selected option
         selected_option = options[selected_option_num - 1]
         
-        # Record the response
+        # Record the response (we'll need to modify this since we don't have option IDs anymore)
         user_response = UserResponse(
             user_id=user_id,
-            question_id=question.id,
-            selected_option_id=selected_option.id,
-            is_correct=selected_option.is_correct
+            question_id=question["id"],
+            selected_option=selected_option_num,  # Store the option number instead
+            is_correct=selected_option["is_correct"]
         )
         db.add(user_response)
         db.commit()
         
         # Get the correct answer
-        correct_options = [opt for opt in options if opt.is_correct]
-        correct_answer = correct_options[0].text if correct_options else "No hay respuesta correcta"
+        correct_options = [opt["text"] for opt in options if opt["is_correct"]]
+        correct_answer = correct_options[0] if correct_options else "No hay respuesta correcta"
         
         # Prepare feedback message
-        if selected_option.is_correct:
+        if selected_option["is_correct"]:
             feedback = f"¡Correcto! La respuesta es: {correct_answer}\n\nSeguirás recibiendo preguntas semanalmente."
         else:
             feedback = f"Incorrecto. La respuesta correcta es: {correct_answer}\n\nSeguirás recibiendo preguntas semanalmente."
         
-        return selected_option.is_correct, feedback
+        return selected_option["is_correct"], feedback
+        
+    except Exception as e:
+        logger.error(f"Error processing user response: {str(e)}")
+        return False, "Lo sentimos, ha ocurrido un error. Inténtalo de nuevo más tarde."
+
+def process_user_response_from_list(db: Session, user_id: int, question_id: int, option_num: int) -> Tuple[bool, str]:
+    """
+    Process a user's response to a question from an interactive list.
+    
+    Args:
+        db: Database session
+        user_id: The user's ID
+        question_id: The question ID
+        option_num: The selected option number (1-based)
+        
+    Returns:
+        Tuple of (is_correct: bool, feedback_message: str)
+    """
+    try:
+        # Get the user
+        user = db.query(User).filter(User.id == user_id).first()
+        
+        if not user:
+            return False, "Usuario no encontrado."
+        
+        # Get the question from the store
+        question = questions_store.get(question_id)
+        
+        if not question:
+            return False, "No encontramos la pregunta correspondiente."
+        
+        options = question["options"]
+        
+        # Check if the selected option number is valid (option_num is 1-based)
+        if option_num < 1 or option_num > len(options):
+            return False, f"Opción inválida. Por favor, selecciona una opción entre 1 y {len(options)}."
+        
+        # Get the selected option (option_num is 1-based, array is 0-based)
+        selected_option = options[option_num - 1]
+        
+        # Record the response
+        user_response = UserResponse(
+            user_id=user_id,
+            question_id=question_id,
+            selected_option=option_num,  # Store the option number
+            is_correct=selected_option["is_correct"]
+        )
+        db.add(user_response)
+        db.commit()
+        
+        # Get the correct answer(s)
+        correct_options = [opt["text"] for opt in options if opt["is_correct"]]
+        correct_answer = correct_options[0] if correct_options else "No hay respuesta correcta"
+        
+        # Prepare feedback message
+        if selected_option["is_correct"]:
+            feedback = f"¡Correcto! La respuesta es: {correct_answer}"
+        else:
+            feedback = f"Incorrecto. La respuesta correcta es: {correct_answer}"
+        
+        return selected_option["is_correct"], feedback
         
     except Exception as e:
         logger.error(f"Error processing user response: {str(e)}")

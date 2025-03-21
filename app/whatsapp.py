@@ -518,4 +518,89 @@ class WhatsAppClient:
                 logger.error(f"[{request_id}] Problem payload: {json.dumps(payload)}")
             except:
                 logger.error(f"[{request_id}] Could not serialize problem payload")
-            return {} 
+            return {}
+    
+    async def send_question_list_message(
+        self, 
+        to_number: str, 
+        question_text: str, 
+        options: List[Dict[str, Any]], 
+        question_id: int
+    ) -> bool:
+        """
+        Send a question using interactive list format.
+        
+        Args:
+            to_number: The recipient's phone number
+            question_text: The question text
+            options: List of answer options (dicts with 'text' and 'is_correct' keys)
+            question_id: The question ID
+            
+        Returns:
+            bool: True if the message was sent successfully, False otherwise
+        """
+        try:
+            # Format the phone number (remove + if present)
+            if to_number.startswith('+'):
+                to_number = to_number[1:]
+            
+            # Create rows for each option
+            rows = []
+            for i, option in enumerate(options):
+                rows.append({
+                    "id": f"q_{question_id}_opt_{i+1}",
+                    "title": f"Opción {i+1}",
+                    "description": option["text"][:72]  # WhatsApp limit is 72 chars
+                })
+            
+            # Create the interactive message
+            payload = {
+                "messaging_product": "whatsapp",
+                "recipient_type": "individual",
+                "to": to_number,
+                "type": "interactive",
+                "interactive": {
+                    "type": "list",
+                    "header": {
+                        "type": "text",
+                        "text": "Pregunta médica"
+                    },
+                    "body": {
+                        "text": question_text
+                    },
+                    "footer": {
+                        "text": "Selecciona la respuesta correcta"
+                    },
+                    "action": {
+                        "button": "Ver opciones",
+                        "sections": [
+                            {
+                                "title": "Opciones de respuesta",
+                                "rows": rows
+                            }
+                        ]
+                    }
+                }
+            }
+            
+            # Send the request
+            url = f"{self.api_url}/{self.phone_number_id}/messages"
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {self.access_token}"
+            }
+            
+            async with httpx.AsyncClient() as client:
+                response = await client.post(url, json=payload, headers=headers)
+            
+            # Check response
+            if response.status_code == 200:
+                logger.info(f"Successfully sent question list message to {to_number}")
+                return True
+            else:
+                logger.error(f"Failed to send question list message: {response.status_code} - {response.text}")
+                return False
+            
+        except Exception as e:
+            logger.error(f"Error sending question list message: {str(e)}")
+            return False 

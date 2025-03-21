@@ -44,10 +44,10 @@ class UserResponse(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"))
-    question_id = Column(Integer, ForeignKey("questions.id"))
-    selected_option_id = Column(Integer, ForeignKey("question_options.id"))
+    question_id = Column(Integer)  # No longer a foreign key
+    selected_option = Column(Integer)  # Store the option number instead of ID
     is_correct = Column(Boolean)
     responded_at = Column(DateTime, default=datetime.datetime.utcnow)
     
     user = relationship("User", back_populates="responses")
-    question = relationship("Question", back_populates="responses") 
+    # Remove relationship with Question 
