@@ -25,55 +25,43 @@ def load_questions_from_csv(db: Session):
         
         # Load the questions
         questions_file = os.path.join('preguntas', 'preguntas.csv')
-        correct_answers_file = os.path.join('preguntas', 'respuestas_correctas.csv')
-        incorrect_answers_file = os.path.join('preguntas', 'respuestas_incorrectas.csv')
         
-        # Check if files exist
-        if not all(os.path.exists(f) for f in [questions_file, correct_answers_file, incorrect_answers_file]):
-            logger.error("Question files not found. Please check the paths.")
+        # Check if file exists
+        if not os.path.exists(questions_file):
+            logger.error("Question file not found. Please check the path.")
             return
         
-        # Load questions
-        questions_df = pd.read_csv(questions_file)
-        correct_df = pd.read_csv(correct_answers_file)
-        incorrect_df = pd.read_csv(incorrect_answers_file)
+        # Load questions - handle duplicate column names by using only the first occurrence
+        questions_df = pd.read_csv(questions_file, low_memory=False)
         
         # Process each question
         for _, row in questions_df.iterrows():
-            question_id = row['id']
-            question_text = row['pregunta']
+            question_id = row['question_id']
+            question_text = row['question_text']
+            correct_answer = row['correct_answer_text']
+            main_area = row.get('main_area', 'General')
+            sub_area = row.get('sub_area', '')
             
             # Create the question
             db_question = Question(
                 id=question_id,
                 text=question_text,
-                area=row.get('area', 'General')  # Default to 'General' if no area specified
+                area=main_area,
+                sub_area=sub_area
             )
             db.add(db_question)
             
-            # Get correct answers for this question
-            correct_answers = correct_df[correct_df['idpregunta'] == question_id]['respuesta'].tolist()
+            # Add correct option
+            db_option = QuestionOption(
+                question_id=question_id,
+                text=correct_answer,
+                is_correct=True
+            )
+            db.add(db_option)
             
-            # Get incorrect answers for this question
-            incorrect_answers = incorrect_df[incorrect_df['idpregunta'] == question_id]['respuesta'].tolist()
-            
-            # Add correct options
-            for answer in correct_answers:
-                db_option = QuestionOption(
-                    question_id=question_id,
-                    text=answer,
-                    is_correct=True
-                )
-                db.add(db_option)
-            
-            # Add incorrect options
-            for answer in incorrect_answers:
-                db_option = QuestionOption(
-                    question_id=question_id,
-                    text=answer,
-                    is_correct=False
-                )
-                db.add(db_option)
+            # Add incorrect options if available
+            # In this new format, we would need to parse them from elsewhere
+            # This is a placeholder for now
         
         # Commit changes
         db.commit()

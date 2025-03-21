@@ -31,7 +31,7 @@ logger.info(f"Default SSL context protocols: {ssl.PROTOCOL_TLS}")
 # Check SSL connection to Meta APIs
 def test_meta_api_connection():
     try:
-        url = "https://graph.facebook.com/v17.0"
+        url = "https://graph.facebook.com/v22.0"
         logger.info(f"Testing connection to Meta API: {url}")
         response = requests.get(url, timeout=10)
         logger.info(f"Connection test status code: {response.status_code}")
