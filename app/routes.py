@@ -2,20 +2,18 @@ from fastapi import APIRouter, Depends, HTTPException, Form, Body, BackgroundTas
 from sqlalchemy.orm import Session
 from typing import Dict, Any, Optional, List
 import logging
-import re
-import httpx
+
 import time
 import json
 import functools
 from datetime import datetime
-import uuid
-import os
+
 
 from . import crud, schemas, models
 from .database import get_db
 from .whatsapp import WhatsAppClient
 from .utils import (
-    load_questions_from_csv, process_user_response, get_random_question, format_question_message, process_user_response_from_list,
+    process_user_response, get_random_question, 
     add_or_update_user, questions_store, users_store, load_questions, load_users, load_responses, load_all_data,
     questions_store, users_store
 )
