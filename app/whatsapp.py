@@ -25,30 +25,27 @@ class WhatsAppClient:
         
     async def send_message(self, to_number: str, message: str) -> bool:
         """
-        Send a WhatsApp message to the specified number using the Meta WhatsApp Cloud API.
+        Send a text message to a WhatsApp number.
         
         Args:
-            to_number: The recipient's phone number (with country code, no +)
-            message: The message text to send
+            to_number: The recipient's phone number
+            message: The message to send
             
         Returns:
             bool: True if the message was sent successfully, False otherwise
         """
         try:
-            # Ensure number is in the right format (no + at the beginning)
-            if to_number.startswith("+"):
+            # Format the phone number (remove + if present)
+            if to_number.startswith('+'):
                 to_number = to_number[1:]
             
-            # API endpoint for sending messages
+            # Prepare the request
             url = f"{self.api_url}/{self.phone_number_id}/messages"
-            
-            # Headers
             headers = {
-                "Authorization": f"Bearer {self.access_token}",
-                "Content-Type": "application/json"
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {self.access_token}"
             }
             
-            # Message payload
             payload = {
                 "messaging_product": "whatsapp",
                 "recipient_type": "individual",
@@ -59,59 +56,46 @@ class WhatsAppClient:
                 }
             }
             
-            # Log the request
-            logger.info(f"Sending WhatsApp message to {to_number}")
-            
             # Send the request
             async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    url,
-                    headers=headers,
-                    json=payload
-                )
-                
-                # Check response
-                if response.status_code == 200:
-                    logger.info(f"Successfully sent WhatsApp message to {to_number}")
-                    return True
-                else:
-                    logger.error(f"Failed to send WhatsApp message: {response.text}")
-                    return False
+                response = await client.post(url, json=payload, headers=headers)
             
+            # Check response
+            if response.status_code == 200:
+                logger.info(f"Successfully sent message to {to_number}")
+                return True
+            else:
+                logger.error(f"Failed to send message: {response.status_code} - {response.text}")
+                return False
+                
         except Exception as e:
             logger.error(f"Error sending WhatsApp message: {str(e)}")
             return False
     
-    async def send_template_message(self, to_number: str, template_name: str, language_code: str = "es", components: Optional[list] = None) -> bool:
+    async def send_template_message(self, to_number: str, template_name: str, language_code: str = "es") -> bool:
         """
         Send a template message to a WhatsApp number.
-        Templates must be pre-approved in the WhatsApp Business Manager.
-        This is required for the first message to a user or when re-engaging after 24 hours.
         
         Args:
-            to_number: The recipient's phone number (with country code, no +)
+            to_number: The recipient's phone number
             template_name: The name of the template
             language_code: The language code (default: es for Spanish)
-            components: Optional template components
             
         Returns:
             bool: True if the template was sent successfully, False otherwise
         """
         try:
-            # Ensure number is in the right format
-            if to_number.startswith("+"):
+            # Format the phone number (remove + if present)
+            if to_number.startswith('+'):
                 to_number = to_number[1:]
-            
-            # API endpoint
+                
+            # Prepare the request
             url = f"{self.api_url}/{self.phone_number_id}/messages"
-            
-            # Headers
             headers = {
-                "Authorization": f"Bearer {self.access_token}",
-                "Content-Type": "application/json"
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {self.access_token}"
             }
             
-            # Template payload
             payload = {
                 "messaging_product": "whatsapp",
                 "recipient_type": "individual",
@@ -125,26 +109,18 @@ class WhatsAppClient:
                 }
             }
             
-            # Add components if provided
-            if components:
-                payload["template"]["components"] = components
-            
             # Send the request
             async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    url,
-                    headers=headers,
-                    json=payload
-                )
-                
-                # Check response
-                if response.status_code == 200:
-                    logger.info(f"Successfully sent template message to {to_number}")
-                    return True
-                else:
-                    logger.error(f"Failed to send template message: {response.text}")
-                    return False
+                response = await client.post(url, json=payload, headers=headers)
             
+            # Check response
+            if response.status_code == 200:
+                logger.info(f"Successfully sent template {template_name} to {to_number}")
+                return True
+            else:
+                logger.error(f"Failed to send template: {response.status_code} - {response.text}")
+                return False
+                
         except Exception as e:
             logger.error(f"Error sending template message: {str(e)}")
             return False

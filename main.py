@@ -63,7 +63,12 @@ app.include_router(router)
 @app.on_event("startup")
 async def startup_event():
     """Load data on startup"""
-    load_all_data()
+    try:
+        logger.info("Starting application and loading data...")
+        load_all_data()
+        logger.info("Application started successfully")
+    except Exception as e:
+        logger.error(f"Error during startup: {str(e)}")
 
 @app.on_event("shutdown")
 async def shutdown_event():

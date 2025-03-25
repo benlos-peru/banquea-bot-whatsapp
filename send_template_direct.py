@@ -40,6 +40,6 @@ async def send_template_message():
     except Exception as e:
         logger.error(f"Error sending template message: {str(e)}")
 
+# Run the async function
 if __name__ == "__main__":
-    # Run the async function
     asyncio.run(send_template_message()) 
