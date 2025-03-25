@@ -108,6 +108,7 @@ def get_user_state_endpoint(phone_number: str):
 async def verify_webhook(request: Request):
     """Verify webhook for WhatsApp API"""
     try:
+        logger.info(f"Received webhook verification request: {request}")
         query_params = dict(request.query_params)
         mode = query_params.get("hub.mode")
         token = query_params.get("hub.verify_token")
