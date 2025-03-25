@@ -27,16 +27,6 @@ logger = logging.getLogger(__name__)
 logger.info(f"OpenSSL version: {ssl.OPENSSL_VERSION}")
 logger.info(f"Default SSL context protocols: {ssl.PROTOCOL_TLS}")
 
-# Check SSL connection to Meta APIs
-def test_meta_api_connection():
-    try:
-        url = "https://graph.facebook.com/v22.0"
-        logger.info(f"Testing connection to Meta API: {url}")
-        response = requests.get(url, timeout=10)
-        logger.info(f"Connection test status code: {response.status_code}")
-        logger.info(f"Connection test headers: {response.headers}")
-    except Exception as e:
-        logger.error(f"Connection test failed: {str(e)}")
 
 # Create the database tables
 Base.metadata.create_all(bind=engine)
@@ -70,12 +60,6 @@ async def startup_event():
     except Exception as e:
         logger.error(f"Error during startup: {str(e)}")
 
-@app.on_event("shutdown")
-async def shutdown_event():
-    """
-    Shutdown event for the application.
-    """
-    logger.info("Shutting down the application")
 
 if __name__ == "__main__":
     # Get port from environment or use default
