@@ -3,7 +3,6 @@ from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy.orm import Session
 import logging
 
-from .utils import send_scheduled_questions
 from .whatsapp import WhatsAppClient
 from .database import SessionLocal
 
