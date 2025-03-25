@@ -16,6 +16,9 @@ class User(Base):
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     last_message_sent = Column(DateTime, nullable=True)
     is_blacklisted = Column(Boolean, default=False)
+    conversation_state = Column(Integer, default=0)  # 0 = INITIAL state
+    last_question_id = Column(Integer, nullable=True)
+    last_question_answered = Column(DateTime, nullable=True)
     
     responses = relationship("UserResponse", back_populates="user")
 

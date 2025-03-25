@@ -1,22 +1,18 @@
-from fastapi import APIRouter, Depends, HTTPException, Form, Body, BackgroundTasks, Request, Query
-from sqlalchemy.orm import Session
-from typing import Dict, Any, Optional, List
+from fastapi import APIRouter, Request, HTTPException
 import logging
-
-import time
 import json
-import functools
 from datetime import datetime
+import random
+from typing import Dict, Any, Optional
 
-
-from . import crud, schemas, models
+from sqlalchemy.orm import Session
 from .database import get_db
 from .whatsapp import WhatsAppClient
 from .utils import (
-    process_user_response, get_random_question, 
-    add_or_update_user, questions_store, users_store, load_questions, load_users, load_responses, load_all_data,
-    questions_store, users_store
+    get_random_question, process_user_response,
+    load_all_data, questions_store
 )
+from . import crud
 
 router = APIRouter()
 whatsapp_client = WhatsAppClient()
@@ -32,77 +28,10 @@ STATES = {
     "AWAITING_QUESTION_RESPONSE": 5
 }
 
-user_states = {}  # In-memory state storage. In production, use a database or Redis
-
-# Create a decorator to log execution time
-def log_execution_time(func):
-    @functools.wraps(func)
-    async def wrapper(*args, **kwargs):
-        request_id = f"req_{int(time.time())}"
-        start_time = time.time()
-        
-        # Log start of execution
-        logger.info(f"[{request_id}] Starting execution of {func.__name__} at {datetime.now().isoformat()}")
-        
-        try:
-            # Pass request_id to the function if it accepts it
-            if 'request_id' in func.__code__.co_varnames:
-                kwargs['request_id'] = request_id
-                result = await func(*args, **kwargs)
-            else:
-                result = await func(*args, **kwargs)
-            
-            # Log successful completion
-            end_time = time.time()
-            execution_time = end_time - start_time
-            logger.info(f"[{request_id}] Successfully completed {func.__name__} in {execution_time:.3f}s")
-            
-            # Add request_id to result if it's a dict
-            if isinstance(result, dict):
-                result['request_id'] = request_id
-                
-            return result
-            
-        except Exception as e:
-            # Log error
-            end_time = time.time()
-            execution_time = end_time - start_time
-            logger.error(f"[{request_id}] Error in {func.__name__} after {execution_time:.3f}s: {str(e)}", exc_info=True)
-            raise
-            
-    return wrapper
-
-def get_user_state(phone_number: str) -> Dict[str, Any]:
-    """Get or initialize user state"""
-    if phone_number not in user_states:
-        user_states[phone_number] = {
-            "state": STATES["INITIAL"],
-            "temp_data": {}
-        }
-    return user_states[phone_number]
-
-def set_user_state(phone_number: str, state: int, temp_data: Optional[Dict[str, Any]] = None):
-    """Update user state"""
-    user_states[phone_number] = {
-        "state": state,
-        "temp_data": temp_data or {}
-    }
-
 @router.get("/")
 def health_check():
     """Simple health check endpoint"""
     return {"status": "healthy", "questions_loaded": len(questions_store)}
-
-@router.get("/debug/user-state/{phone_number}")
-def get_user_state_endpoint(phone_number: str):
-    """Debug endpoint to check a user's state"""
-    state = get_user_state(phone_number)
-    return {
-        "phone_number": phone_number,
-        "state": state.get("state"),
-        "state_name": next((k for k, v in STATES.items() if v == state.get("state")), "UNKNOWN"),
-        "temp_data": state.get("temp_data", {})
-    }
 
 @router.get("/webhook")
 async def verify_webhook(request: Request):
@@ -123,8 +52,8 @@ async def verify_webhook(request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/webhook")
-async def webhook(request: Request):
-    """Handle WhatsApp webhook"""
+async def webhook(request: Request, db: Session = get_db()):
+    """Handle WhatsApp webhook - this is the main entry point for all WhatsApp interactions"""
     try:
         body = await request.json()
         logger.info(f"Received webhook: {json.dumps(body)}")
@@ -132,7 +61,7 @@ async def webhook(request: Request):
         # Check if this is just a WhatsApp verification message
         if "object" not in body or body.get("object") != "whatsapp_business_account":
             return {"status": "ignored"}
-            
+        
         # Process messages
         try:
             entry = body["entry"][0]
@@ -141,6 +70,10 @@ async def webhook(request: Request):
             
             # Check if there are messages
             if "messages" not in value:
+                # Check if this is a status update
+                if "statuses" in value:
+                    # Handle message status updates if needed
+                    logger.info("Received status update")
                 return {"status": "no messages"}
                 
             message = value["messages"][0]
@@ -153,55 +86,28 @@ async def webhook(request: Request):
                 if "profile" in contact:
                     name = contact["profile"].get("name")
             
-            # Add or update user
-            add_or_update_user(phone_number, name)
+            # Get or create user in database
+            user = crud.get_user_by_phone(db, phone_number)
+            if not user:
+                user = crud.create_user(db, phone_number)
+                # Set initial state for new users
+                user.conversation_state = STATES["INITIAL"]
+                db.commit()
             
-            # Process different message types
-            if message["type"] == "interactive" and "list_reply" in message["interactive"]:
-                # Handle interactive list reply (answer to a question)
-                list_reply = message["interactive"]["list_reply"]
-                option_id = list_reply["id"]  # Format: q_{question_id}_opt_{option_number}
-                
-                # Parse question_id and option_number
-                parts = option_id.split("_")
-                if len(parts) >= 4:
-                    question_id = int(parts[1])
-                    option_num = int(parts[3])
-                    
-                    # Process response
-                    is_correct, feedback = process_user_response(phone_number, question_id, option_num)
-                    
-                    # Send feedback
-                    await whatsapp_client.send_message(phone_number, feedback)
-                else:
-                    logger.error(f"Invalid option ID format: {option_id}")
-                    await whatsapp_client.send_message(phone_number, "Lo siento, hubo un error procesando tu respuesta.")
+            # Get current conversation state
+            current_state = user.conversation_state
             
+            # Handle different message types
+            if message["type"] == "interactive":
+                await handle_interactive_message(db, user, message)
             elif message["type"] == "text":
-                # Handle text message - send a random question
-                text = message["text"]["body"].strip().lower()
-                
-                if text in ["hola", "hello", "hi", "inicio", "start", "comenzar"]:
-                    # Welcome message
-                    await whatsapp_client.send_message(
-                        phone_number, 
-                        "¡Hola! Soy el bot de Banquea que te enviará preguntas médicas. Responde para recibir tu primera pregunta."
-                    )
-                    
-                # Send a random question
-                question = get_random_question()
-                if question:
-                    await whatsapp_client.send_question_list_message(
-                        phone_number,
-                        question["text"],
-                        question["options"],
-                        question["id"]
-                    )
-                else:
-                    await whatsapp_client.send_message(
+                await handle_text_message(db, user, message)
+            else:
+                # Send fallback message for unsupported message types
+                await whatsapp_client.send_message(
                     phone_number,
-                        "Lo siento, no hay preguntas disponibles en este momento."
-                    )
+                    "Lo siento, no puedo procesar este tipo de mensaje. Por favor, envía un mensaje de texto."
+                )
             
             return {"status": "success"}
             
@@ -210,348 +116,220 @@ async def webhook(request: Request):
             return {"status": "error", "error": f"Missing field: {str(e)}"}
     
     except Exception as e:
-        logger.error(f"Error in webhook: {str(e)}")
+        logger.error(f"Error in webhook: {str(e)}", exc_info=True)
         return {"status": "error", "message": str(e)}
 
-@router.post("/admin/blacklist/{phone_number}")
-def blacklist_user_endpoint(
-    phone_number: str,
-    db: Session = Depends(get_db)
-):
-    """Admin endpoint to blacklist a user"""
-    user = crud.get_user_by_phone(db, phone_number)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+async def handle_interactive_message(db: Session, user, message):
+    """Handle interactive message responses (buttons or list selections)"""
+    phone_number = user.phone_number
     
-    crud.blacklist_user(db, user.id)
-    return {"status": "success", "message": f"User {phone_number} has been blacklisted"}
-
-@router.post("/admin/load-questions")
-def reload_questions():
-    """Admin endpoint to reload questions from CSV files"""
-    try:
-        load_questions()
-        return {"status": "success", "message": f"Successfully loaded {len(questions_store)} questions"}
-    except Exception as e:
-        logger.error(f"Error loading questions: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error loading questions: {str(e)}")
-
-@router.post("/admin/reload-all-data")
-def reload_all_data():
-    """Admin endpoint to reload all data from CSV files"""
-    try:
-        load_all_data()
-        return {
-            "status": "success", 
-            "questions": len(questions_store),
-            "users": len(users_store)
-        }
-    except Exception as e:
-        logger.error(f"Error reloading data: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.get("/admin/stats")
-def get_stats():
-    """Get statistics about the data"""
-    return {
-        "questions": len(questions_store),
-        "users": len(users_store)
-    }
-
-@router.post("/admin/add-test-user")
-async def add_test_user(
-    phone_number: str = Body(...),
-    template_name: str = Body(...),
-    language_code: str = Body("es"),
-    db: Session = Depends(get_db)
-):
-    """
-    Add a test user and send a template message to them.
-    This is useful for testing the WhatsApp integration.
+    if "button_reply" in message["interactive"]:
+        # Handle button replies (Yes/No responses)
+        button_reply = message["interactive"]["button_reply"]
+        button_id = button_reply["id"]
+        
+        if user.conversation_state == STATES["AWAITING_CONFIRMATION"]:
+            if button_id == "yes_button":
+                # Check if this is a returning user (with day and hour already set)
+                if user.preferred_day is not None and user.preferred_hour is not None:
+                    # Returning user with preferences already set - send question immediately
+                    await send_random_question(db, user)
+                else:
+                    # First-time user - move to day selection
+                    user.conversation_state = STATES["AWAITING_DAY"]
+                    db.commit()
+                    
+                    # Send day selection list (not template)
+                    await whatsapp_client.send_day_selection_message(
+                        phone_number,
+                        "Por favor selecciona el día de la semana en que deseas recibir las preguntas:"
+                    )
+            elif button_id == "no_button":
+                # User declined, send goodbye message
+                await whatsapp_client.send_message(
+                    phone_number,
+                    "Entendido. Si cambias de opinión, escribe 'hola' para comenzar nuevamente."
+                )
+                # Reset state
+                user.conversation_state = STATES["INITIAL"]
+                db.commit()
+        else:
+            # Handle unexpected button reply
+            await send_fallback_message(db, user)
     
-    Args:
-        phone_number: The user's phone number with country code (e.g., +51973296571)
-        template_name: The name of the template to send
-        language_code: The language code for the template (default: es)
-    """
-    try:
-        # Clean up phone number
-        if not phone_number.startswith("+"):
-            phone_number = f"+{phone_number}"
+    elif "list_reply" in message["interactive"]:
+        # Handle list replies (day selection or question answers)
+        list_reply = message["interactive"]["list_reply"]
+        selection_id = list_reply["id"]
+        selection_title = list_reply["title"]
         
-        # Create or get user
-        user = crud.get_user_by_phone(db, phone_number)
-        if not user:
-            user = crud.create_user(db, phone_number)
-            logger.info(f"Created new test user with phone number: {phone_number}")
+        if user.conversation_state == STATES["AWAITING_DAY"]:
+            # Handle day selection
+            # Extract day from selection_id (format: "day_X" where X is 0-6)
+            if selection_id.startswith("day_"):
+                try:
+                    selected_day = int(selection_id.split("_")[1])
+                    
+                    # Store selected day
+                    user.preferred_day = selected_day
+                    user.conversation_state = STATES["AWAITING_HOUR"]
+                    db.commit()
+                    
+                    # Ask for hour selection
+                    await whatsapp_client.send_message(
+                        phone_number,
+                        "¿A qué hora del día te gustaría recibir las preguntas? Por favor, indica la hora en formato de 24 horas (0-23)."
+                    )
+                except (ValueError, IndexError):
+                    await send_fallback_message(db, user)
+            else:
+                await send_fallback_message(db, user)
+                
+        elif user.conversation_state == STATES["AWAITING_QUESTION_RESPONSE"]:
+            # Handle question response
+            # Format: q_{question_id}_opt_{option_number}
+            parts = selection_id.split("_")
+            if len(parts) >= 4 and parts[0] == "q" and parts[2] == "opt":
+                try:
+                    question_id = int(parts[1])
+                    option_num = int(parts[3])
+                    
+                    # Process response
+                    is_correct, feedback = process_user_response(phone_number, question_id, option_num)
+                    
+                    # Send feedback
+                    await whatsapp_client.send_message(phone_number, feedback)
+                    
+                    # Update state
+                    user.conversation_state = STATES["SUBSCRIBED"]
+                    user.last_question_answered = datetime.utcnow()
+                    db.commit()
+                except (ValueError, IndexError):
+                    await send_fallback_message(db, user)
+            else:
+                await send_fallback_message(db, user)
         else:
-            logger.info(f"Using existing user with phone number: {phone_number}")
-        
-        # Send template message
-        success = await whatsapp_client.send_template_message(
-            phone_number,
-            template_name,
-            language_code
-        )
-        
-        if success:
-            return {
-                "status": "success",
-                "message": f"Template message '{template_name}' sent successfully to {phone_number}",
-                "user_id": user.id
-            }
-        else:
-            return {
-                "status": "error",
-                "message": f"Failed to send template message to {phone_number}"
-            }
+            # Handle unexpected list reply
+            await send_fallback_message(db, user)
+
+async def handle_text_message(db: Session, user, message):
+    """Handle text message responses"""
+    phone_number = user.phone_number
+    text = message["text"]["body"].strip().lower()
+    
+    # Special commands
+    if text == "%%force_new_question":
+        # Force send a new question regardless of state
+        await send_random_question(db, user)
+        return
+    
+    # Handle based on conversation state
+    if user.conversation_state == STATES["INITIAL"]:
+        # Initial greeting / start command
+        if text in ["hola", "hello", "hi", "inicio", "start", "comenzar"]:
+            # Check if this is a returning user with previous answers
+            user_has_previous_answers = db.query(crud.models.UserResponse).filter(
+                crud.models.UserResponse.user_id == user.id
+            ).count() > 0
             
-    except Exception as e:
-        logger.error(f"Error adding test user: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error adding test user: {str(e)}")
-
-@router.post("/admin/send-day-selection")
-async def send_day_selection_test(
-    request: Request,
-    db: Session = Depends(get_db)
-):
-    """
-    Send a day selection list to a test user.
-    
-    Args:
-        request: FastAPI request object
-        db: Database session
-    """
-    try:
-        # Get JSON from request body
-        body = await request.json()
-        phone_number = body.get("phone_number")
-        
-        if not phone_number:
-            raise HTTPException(status_code=400, detail="phone_number is required")
-        
-        # Clean up phone number
-        if not phone_number.startswith("+"):
-            phone_number = f"+{phone_number}"
-        
-        # Create or get user
-        user = crud.get_user_by_phone(db, phone_number)
-        if not user:
-            user = crud.create_user(db, phone_number)
-            logger.info(f"Created new test user with phone number: {phone_number}")
-        else:
-            logger.info(f"Using existing user with phone number: {phone_number}")
-        
-        # Send day selection message
-        await send_day_selection_message(
-            phone_number,
-            "Por favor selecciona el día de la semana en que deseas recibir las preguntas:"
-        )
-        
-        return {
-            "status": "success",
-            "message": f"Day selection message sent successfully to {phone_number}",
-            "user_id": user.id
-        }
+            if user_has_previous_answers:
+                # Returning user - send confirmation template
+                await whatsapp_client.send_template_message(
+                    phone_number,
+                    "confirmacion_pregunta",
+                    "es"
+                )
+            else:
+                # First-time user - send welcome template
+                await whatsapp_client.send_template_message(
+                    phone_number,
+                    "bienvenida_banquea",
+                    "es"
+                )
             
-    except Exception as e:
-        logger.error(f"Error sending day selection: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error sending day selection: {str(e)}")
-
-@router.post("/admin/send-button-message")
-async def send_button_message_test(
-    request: Request,
-    db: Session = Depends(get_db)
-):
-    """
-    Send a button message to a test user.
-    
-    Args:
-        request: FastAPI request object
-        db: Database session
-    """
-    try:
-        # Get JSON from request body
-        body = await request.json()
-        phone_number = body.get("phone_number")
-        
-        if not phone_number:
-            raise HTTPException(status_code=400, detail="phone_number is required")
-        
-        # Clean up phone number
-        if not phone_number.startswith("+"):
-            phone_number = f"+{phone_number}"
-        
-        # Create or get user
-        user = crud.get_user_by_phone(db, phone_number)
-        if not user:
-            user = crud.create_user(db, phone_number)
-            logger.info(f"Created new test user with phone number: {phone_number}")
+            user.conversation_state = STATES["AWAITING_CONFIRMATION"]
+            db.commit()
         else:
-            logger.info(f"Using existing user with phone number: {phone_number}")
-        
-        # Send button message
-        await send_simple_button_message(
-            phone_number,
-            "¿Estás listo para comenzar con las preguntas médicas?",
-            "Configuración de preguntas"
-        )
-        
-        return {
-            "status": "success",
-            "message": f"Button message sent successfully to {phone_number}",
-            "user_id": user.id
-        }
-            
-    except Exception as e:
-        logger.error(f"Error sending button message: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error sending button message: {str(e)}")
-
-@log_execution_time
-async def send_simple_button_message(phone_number: str, body_text: str, header_text: Optional[str] = None, request_id: str = None):
-    """
-    Send a simple button message with Yes/No options
+            # Send a standard greeting for any other message
+            await whatsapp_client.send_message(
+                phone_number, 
+                "¡Hola! Soy el bot de Banquea. Escribe 'hola' para comenzar."
+            )
     
-    Args:
-        phone_number: The user's phone number
-        body_text: The main message text
-        header_text: Optional header text
-        request_id: Request ID for consistent logging
-    """
-    logger.info(f"[{request_id}] Preparing button message for {phone_number}")
-    
-    # Create the buttons
-    buttons = [
-        {
-            "type": "reply",
-            "reply": {
-                "id": "yes_button",
-                "title": "Sí"
-            }
-        },
-        {
-            "type": "reply",
-            "reply": {
-                "id": "no_button",
-                "title": "No"
-            }
-        }
-    ]
-    
-    logger.info(f"[{request_id}] Sending button message with {len(buttons)} options")
-    
-    # Send the button message
-    result = await whatsapp_client.send_button_message(
-        to_number=phone_number,
-        body_text=body_text,
-        buttons=buttons,
-        header_text=header_text,
-        footer_text="Banquea - Bot de preguntas médicas"
-    )
-    
-    logger.info(f"[{request_id}] Button message send result: {result}")
-    return result 
-
-async def handle_day_selection(phone_number: str, day_id: str, day_title: str, user_id: int, db: Session, request_id: str = None):
-    """
-    Handle day selection and go directly to sending a question.
-    
-    Args:
-        phone_number: The user's phone number
-        day_id: The selected day ID
-        day_title: The selected day title
-        user_id: The user's ID
-        db: Database session
-        request_id: Request ID for consistent logging
-    """
-    try:
-        # Convert day name to day index (0 = Monday, 6 = Sunday)
-        day_map = {
-            "lunes": 0, "martes": 1, "miércoles": 2, "miercoles": 2, 
-            "jueves": 3, "viernes": 4, "sábado": 5, "sabado": 5, "domingo": 6
-        }
-        
-        day_value = day_map.get(day_title.lower())
-        
-        if day_value is None:
-            logger.error(f"[{request_id}] Invalid day selected: {day_title}")
+    elif user.conversation_state == STATES["AWAITING_HOUR"]:
+        # Process hour selection
+        try:
+            hour = int(text)
+            if 0 <= hour <= 23:
+                # Valid hour, store it
+                user.preferred_hour = hour
+                user.conversation_state = STATES["SUBSCRIBED"]
+                db.commit()
+                
+                # Confirmation message
+                day_names = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
+                await whatsapp_client.send_message(
+                    phone_number,
+                    f"¡Perfecto! Recibirás preguntas cada {day_names[user.preferred_day]} a las {hour}:00 horas. "
+                    f"Para recibir una pregunta ahora, envía '%%force_new_question'."
+                )
+                
+                # Send a first question immediately
+                await send_random_question(db, user)
+            else:
+                await whatsapp_client.send_message(
+                    phone_number,
+                    "Por favor, indica una hora válida entre 0 y 23."
+                )
+        except ValueError:
             await whatsapp_client.send_message(
                 phone_number,
-                "Lo siento, hubo un error con tu selección. Por favor intenta de nuevo."
+                "Por favor, indica la hora como un número entre 0 y 23."
             )
-            return False
-            
-        # Update user preferences (set default hour to 9)
-        crud.update_user_preferences(db, user_id, day_value, 9)  # Default to 9 AM
-        logger.info(f"[{request_id}] Updated user preferences: day={day_value}, hour=9 (default)")
-        
-        # Get a random question
-        question = get_random_question()
-        if not question:
-            logger.error(f"[{request_id}] No questions available")
-            await whatsapp_client.send_message(
-                phone_number,
-                "Lo sentimos, no pudimos encontrar preguntas disponibles. Por favor intenta más tarde."
-            )
-            return False
-        
-        # Store the current question ID for the user
-        user = crud.get_user_by_id(db, user_id)
+    
+    elif user.conversation_state == STATES["SUBSCRIBED"]:
+        # User is subscribed, sending a random message
+        await whatsapp_client.send_message(
+            phone_number,
+            "Recibirás una pregunta médica en el horario programado. "
+            "Si deseas recibir una pregunta ahora, envía '%%force_new_question'."
+        )
+    
+    else:
+        # For any other state, send fallback
+        await send_fallback_message(db, user)
+
+async def send_random_question(db: Session, user):
+    """Send a random question to the user"""
+    phone_number = user.phone_number
+    
+    question = get_random_question()
+    if question:
+        # Update user state
+        user.conversation_state = STATES["AWAITING_QUESTION_RESPONSE"]
         user.last_question_id = question["id"]
         user.last_message_sent = datetime.utcnow()
         db.commit()
         
-        # Send the question as an interactive list
-        result = await whatsapp_client.send_question_list_message(
+        # Send question
+        await whatsapp_client.send_question_list_message(
             phone_number,
             question["text"],
             question["options"],
             question["id"]
         )
-        
-        if result:
-            # Set user state to waiting for question response
-            set_user_state(phone_number, STATES["AWAITING_QUESTION_RESPONSE"])
-            logger.info(f"[{request_id}] Set user state to AWAITING_QUESTION_RESPONSE")
-            return True
-        else:
-            logger.error(f"[{request_id}] Failed to send question to {phone_number}")
-            return False
-            
-    except Exception as e:
-        logger.error(f"[{request_id}] Error handling day selection: {str(e)}")
-        return False
+    else:
+        await whatsapp_client.send_message(
+            phone_number,
+            "Lo siento, no hay preguntas disponibles en este momento."
+        )
 
-@router.post("/admin/send-question-to-all")
-async def send_question_to_all():
-    """Send a random question to all users"""
-    try:
-        question = get_random_question()
-        if not question:
-            raise HTTPException(status_code=400, detail="No questions available")
-        
-        success = 0
-        failed = 0
-        
-        for phone_number in users_store:
-            result = await whatsapp_client.send_question_list_message(
-                phone_number,
-                question["text"],
-                question["options"],
-                question["id"]
-            )
-            
-            if result:
-                success += 1
-            else:
-                failed += 1
-        
-        return {
-            "status": "success",
-            "sent": success,
-            "failed": failed
-        }
-        
-    except Exception as e:
-        logger.error(f"Error sending questions: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e)) 
+async def send_fallback_message(db: Session, user):
+    """Send fallback message when we don't understand the user's input"""
+    phone_number = user.phone_number
+    
+    await whatsapp_client.send_message(
+        phone_number,
+        "Lo siento, no entiendo tu mensaje. "
+        "Si deseas recibir una pregunta médica, escribe '%%force_new_question'."
+    ) 

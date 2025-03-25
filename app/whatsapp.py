@@ -579,4 +579,55 @@ class WhatsAppClient:
             
         except Exception as e:
             logger.error(f"Error sending question list message: {str(e)}")
+            return False
+    
+    async def send_day_selection_message(self, to_number: str, body_text: str) -> bool:
+        """
+        Send a day selection list to a user.
+        
+        Args:
+            to_number: The recipient's phone number
+            body_text: The main message text
+            
+        Returns:
+            bool: True if the message was sent successfully, False otherwise
+        """
+        try:
+            # Format the phone number (remove + if present)
+            if to_number.startswith('+'):
+                to_number = to_number[1:]
+            
+            # Create the days list
+            days = [
+                {"id": "day_0", "title": "Lunes"},
+                {"id": "day_1", "title": "Martes"},
+                {"id": "day_2", "title": "Miércoles"},
+                {"id": "day_3", "title": "Jueves"},
+                {"id": "day_4", "title": "Viernes"},
+                {"id": "day_5", "title": "Sábado"},
+                {"id": "day_6", "title": "Domingo"}
+            ]
+            
+            # Create sections for the list
+            sections = [{
+                "title": "Días de la semana",
+                "rows": [
+                    {"id": day["id"], "title": day["title"]} for day in days
+                ]
+            }]
+            
+            # Send the interactive list message
+            result = await self.send_interactive_list_message(
+                to_number,
+                body_text,
+                "Seleccionar día",
+                sections,
+                header_text="Programación",
+                footer_text="Banquea - Bot de preguntas médicas"
+            )
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error sending day selection message: {str(e)}")
             return False 

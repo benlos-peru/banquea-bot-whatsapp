@@ -1,6 +1,114 @@
 # Banquea WhatsApp Bot
 
-Bot de WhatsApp para enviar preguntas médicas aleatorias a usuarios para reforzamiento.
+A WhatsApp bot that sends medical questions to users on a scheduled basis.
+
+## Features
+
+- Users can select when they want to receive medical questions (day and time)
+- Questions are sent as interactive messages with multiple choice answers
+- Users receive feedback on their answers
+- Scheduled delivery of questions based on user preferences
+- Special command to force a new question at any time
+- Different conversation flows for first-time vs. returning users
+- Bulk messaging capabilities to initiate conversations with users
+
+## Architecture
+
+- FastAPI backend with webhook for WhatsApp Cloud API
+- SQLite database for storing user information and conversation states
+- In-memory cache for questions and options
+- APScheduler for scheduled message delivery
+
+## Setup
+
+1. Clone the repository
+2. Install dependencies:
+   ```
+   pip install -r requirements.txt
+   ```
+3. Configure WhatsApp Cloud API credentials in `.env` file:
+   ```
+   WHATSAPP_PHONE_NUMBER_ID=your_phone_number_id
+   WHATSAPP_BUSINESS_ACCOUNT_ID=your_business_account_id
+   WHATSAPP_ACCESS_TOKEN=your_access_token
+   WHATSAPP_VERIFY_TOKEN=your_verify_token
+   ```
+4. Run the server:
+   ```
+   python main.py
+   ```
+
+## WhatsApp Integration
+
+To integrate with WhatsApp Cloud API:
+
+1. Create a developer account on [Meta for Developers](https://developers.facebook.com/)
+2. Create a WhatsApp Business App
+3. Set up webhook with the verify token from your `.env` file
+4. Add the required templates to your WhatsApp Business Manager:
+   - `bienvenida_banquea`: Initial welcome template with Yes/No buttons (first-time users)
+   - `confirmacion_pregunta`: Template asking if user wants to receive a question (returning users)
+   - `seleccion_fecha`: Template for selecting day of week
+
+## Testing
+
+You can use the provided script to send a test question to a user:
+
+```
+python send_question.py +123456789
+```
+
+## Conversation Flow
+
+The bot maintains different conversation flows based on user history:
+
+### First-time Users:
+1. User sends "hola" to start
+2. Bot asks if they want to receive questions (bienvenida_banquea template)
+3. If Yes, bot asks for day preference using interactive list
+4. Bot asks for time preference (hour of day)
+5. Bot confirms schedule and sends first question
+
+### Returning Users:
+1. User sends "hola" to start
+2. Bot asks if they're ready for a new question (confirmacion_pregunta template)
+3. If Yes, bot immediately sends a new question
+4. User can always force a new question with command `%%force_new_question`
+
+## Bulk Messaging
+
+The system includes a script for sending bulk messages to users in the database:
+
+```bash
+# Send to 100 users (default)
+python send_bulk_messages.py
+
+# Send to a specific number of users
+python send_bulk_messages.py --limit=50
+```
+
+The script:
+- Identifies uncontacted users in the database
+- Distinguishes between first-time and returning users
+- Sends the appropriate template based on user history
+- Updates user status in the database
+- Includes delay between messages to avoid rate limiting
+
+## Database
+
+The system uses the following tables:
+- Users: Store user information, preferences and conversation state
+- Questions: Questions loaded from CSV files
+- User Responses: Track user answers for analytics
+
+## Development
+
+The main components are:
+- `app/routes.py`: Main webhook handler and conversation logic
+- `app/whatsapp.py`: WhatsApp API client for sending messages
+- `app/models.py`: Database models
+- `app/scheduler.py`: Scheduled tasks for sending questions
+- `app/utils.py`: Utility functions for loading and processing data
 
 ## Características
 

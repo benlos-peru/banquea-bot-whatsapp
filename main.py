@@ -1,7 +1,6 @@
 import logging
 import os
 import ssl
-import requests
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
@@ -20,20 +19,14 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 
-# Enable detailed SSL debugging
-logging.getLogger('urllib3').setLevel(logging.DEBUG)
-logging.getLogger('httpx').setLevel(logging.DEBUG)
-
 # Log SSL/TLS info
 logger = logging.getLogger(__name__)
 logger.info(f"OpenSSL version: {ssl.OPENSSL_VERSION}")
-logger.info(f"Default SSL context protocols: {ssl.PROTOCOL_TLS}")
-
 
 # Create the database tables
 Base.metadata.create_all(bind=engine)
 
-# Test WhatsApp API connection (can be moved inside lifespan)
+# Test WhatsApp API connection
 def test_meta_api_connection():
     try:
         logger.info("Testing connection to Meta APIs")
@@ -62,6 +55,13 @@ async def lifespan(app: FastAPI):
         # Load data on startup
         load_all_data()
         
+        # Start the scheduler
+        scheduler = start_scheduler()
+        if scheduler:
+            logger.info("Scheduler started successfully")
+        else:
+            logger.warning("Failed to start scheduler")
+            
         logger.info("Application startup complete")
     except Exception as e:
         logger.error(f"Error during startup: {str(e)}")
@@ -78,7 +78,7 @@ async def lifespan(app: FastAPI):
 # Initialize FastAPI app with lifespan
 app = FastAPI(
     title="Banquea WhatsApp Bot",
-    description="Simple WhatsApp bot for medical questions",
+    description="WhatsApp bot for medical questions",
     version="1.0.0",
     lifespan=lifespan,
 )
@@ -101,7 +101,6 @@ if __name__ == "__main__":
     
     # Log server startup details
     logger.info(f"Starting server on port {port}")
-    
     
     # Start the server
     uvicorn.run(
