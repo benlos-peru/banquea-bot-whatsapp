@@ -84,20 +84,6 @@ if __name__ == "__main__":
     # Log server startup details
     logger.info(f"Starting server on port {port}")
     
-    # Get SSL configuration from environment
-    ssl_keyfile = os.getenv("SSL_KEYFILE")
-    ssl_certfile = os.getenv("SSL_CERTFILE")
-    
-    # If SSL files are provided, use them
-    ssl_config = {}
-    if ssl_keyfile and ssl_certfile:
-        logger.info(f"Using SSL with cert: {ssl_certfile}, key: {ssl_keyfile}")
-        ssl_config = {
-            "ssl_keyfile": ssl_keyfile,
-            "ssl_certfile": ssl_certfile,
-        }
-    else:
-        logger.warning("Running without SSL. WhatsApp webhook verification requires HTTPS!")
     
     # Start the server
     uvicorn.run(
@@ -105,5 +91,4 @@ if __name__ == "__main__":
         host="0.0.0.0",
         port=port,
         reload=True,
-        **ssl_config
     ) 
