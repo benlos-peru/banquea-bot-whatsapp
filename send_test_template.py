@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 
 # Configuration
-API_URL = "http://localhost:8000"  # Update if your server is running on a different host/port
+API_URL = "https://bot-whatsapp.banquea.pe"  # Update if your server is running on a different host/port
 PHONE_NUMBER = "+51973296571"      # The test phone number
 TEMPLATE_NAME = "seleccion_de_fecha"  # The template name to use
 LANGUAGE_CODE = "es"               # The language code

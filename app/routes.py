@@ -14,7 +14,10 @@ import os
 from . import crud, schemas, models
 from .database import get_db
 from .whatsapp import WhatsAppClient
-from .utils import load_questions_from_csv, process_user_response, get_random_question, format_question_message, process_user_response_from_list
+from .utils import (
+    load_questions_from_csv, process_user_response, get_random_question, format_question_message, process_user_response_from_list,
+    add_or_update_user, questions_store, users_store
+)
 
 router = APIRouter()
 whatsapp_client = WhatsAppClient()
@@ -850,51 +853,35 @@ async def handle_day_selection(phone_number: str, day_id: str, day_title: str, u
         return False
 
 @router.post("/admin/send-question-to-all")
-async def send_question_to_all_users(
-    db: Session = Depends(get_db)
-):
-    """Admin endpoint to force send a question to all active users"""
+async def send_question_to_all():
+    """Send a random question to all users"""
     try:
-        users = db.query(models.User).filter(
-            models.User.is_active == True,
-            models.User.is_blacklisted == False
-        ).all()
+        question = get_random_question()
+        if not question:
+            raise HTTPException(status_code=400, detail="No questions available")
         
-        success_count = 0
-        fail_count = 0
+        success = 0
+        failed = 0
         
-        for user in users:
-            # Get a random question
-            question = get_random_question()
-            if not question:
-                logger.error("No questions available in memory")
-                continue
-            
-            # Send the question
+        for phone_number in users_store:
             result = await whatsapp_client.send_question_list_message(
-                user.phone_number,
-                question["text"],
-                question["options"],
-                question["id"]
+                phone_number,
+                question['text'],
+                question['options'],
+                question['id']
             )
             
             if result:
-                # Update user info
-                user.last_message_sent = datetime.utcnow()
-                user.last_question_id = question["id"]
-                db.commit()
-                
-                # Set user state to waiting for question response
-                set_user_state(user.phone_number, STATES["AWAITING_QUESTION_RESPONSE"])
-                
-                success_count += 1
+                success += 1
             else:
-                fail_count += 1
+                failed += 1
         
         return {
-            "status": "success", 
-            "message": f"Question sent to {success_count} users. Failed: {fail_count}"
+            "status": "success",
+            "sent": success,
+            "failed": failed
         }
+        
     except Exception as e:
-        logger.error(f"Error sending questions to all users: {str(e)}")
+        logger.error(f"Error sending questions: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e)) 

@@ -10,21 +10,20 @@ from app.routes import router
 from app.database import engine
 from app.models import Base
 from app.scheduler import start_scheduler
-from app.utils import load_questions_from_csv
-from app.database import SessionLocal
+from app.utils import load_all_data
 
-# Configure more verbose logging
+# Configure logging
 logging.basicConfig(
-    level=logging.DEBUG,  # Changed from INFO to DEBUG for more detailed logs
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
-logger = logging.getLogger(__name__)
 
 # Enable detailed SSL debugging
 logging.getLogger('urllib3').setLevel(logging.DEBUG)
 logging.getLogger('httpx').setLevel(logging.DEBUG)
 
 # Log SSL/TLS info
+logger = logging.getLogger(__name__)
 logger.info(f"OpenSSL version: {ssl.OPENSSL_VERSION}")
 logger.info(f"Default SSL context protocols: {ssl.PROTOCOL_TLS}")
 
@@ -45,48 +44,26 @@ Base.metadata.create_all(bind=engine)
 # Initialize FastAPI app
 app = FastAPI(
     title="Banquea WhatsApp Bot",
-    description="API for Banquea medical questions bot",
+    description="Simple WhatsApp bot for medical questions",
     version="1.0.0",
 )
 
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, restrict this to specific domains
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Include routers
+# Include routes
 app.include_router(router)
 
 @app.on_event("startup")
 async def startup_event():
-    """
-    Startup event for the application.
-    - Initialize database
-    - Load questions from CSV files
-    - Start the scheduler
-    """
-    try:
-        logger.info("Starting up the application")
-        
-        # Test connection to Meta APIs
-        test_meta_api_connection()
-        
-        # Load questions from CSV files into memory
-        load_questions_from_csv()
-        
-        # Start the scheduler for sending questions
-        scheduler = start_scheduler()
-        if not scheduler:
-            logger.error("Failed to start scheduler")
-            
-        logger.info("Application startup complete")
-        
-    except Exception as e:
-        logger.error(f"Error during startup: {str(e)}")
+    """Load data on startup"""
+    load_all_data()
 
 @app.on_event("shutdown")
 async def shutdown_event():
