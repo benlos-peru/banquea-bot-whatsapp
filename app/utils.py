@@ -37,8 +37,8 @@ def load_questions():
             qid = int(row['question_id'])
             
             # Get answers
-            correct = correct_df[correct_df['pregunta_id'] == qid]['respuesta_texto'].tolist()
-            incorrect = incorrect_df[incorrect_df['pregunta_id'] == qid]['respuesta_texto'].tolist()
+            correct = correct_df[correct_df['question_id'] == qid]['respuesta_texto'].tolist()
+            incorrect = incorrect_df[incorrect_df['question_id'] == qid]['respuesta_texto'].tolist()
             
             # Create options
             options = (
