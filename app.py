@@ -49,11 +49,11 @@ def create_app() -> FastAPI:
     return app
 
 # Initialize the app at module level
-app = create_app()
+server = create_app()
 
 if __name__ == "__main__":
     uvicorn.run(
-        "app:app",
+        "app:server",
         host="0.0.0.0",
         port=8000,
         reload=True  # Enable auto-reload during development
