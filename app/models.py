@@ -13,7 +13,7 @@ class User(Base):
     preferred_day = Column(Integer)  # 0-6 for Monday to Sunday
     preferred_hour = Column(Integer) # 0-23 hours
     is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.datetime.now(datetime.timezone.utc))
     last_message_sent = Column(DateTime, nullable=True)
     is_blacklisted = Column(Boolean, default=False)
     conversation_state = Column(Integer, default=0)  # 0 = INITIAL state
