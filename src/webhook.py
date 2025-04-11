@@ -12,12 +12,7 @@ router = APIRouter()
 whatsapp_client = WhatsAppClient()
 
 @router.get("/webhook")
-async def verify_webhook(
-    request: Request,
-    hub_mode: str = None,
-    hub_verify_token: str = None,
-    hub_challenge: str = None
-):
+async def verify_webhook(request: Request):
     """
     Verify webhook endpoint for WhatsApp Cloud API.
     This endpoint is called by WhatsApp when setting up the webhook.
@@ -25,6 +20,12 @@ async def verify_webhook(
     """
     try:
         logger.info("Received webhook verification request")
+        
+        # Get query parameters
+        params = request.query_params
+        hub_mode = params.get("hub.mode")
+        hub_verify_token = params.get("hub.verify_token")
+        hub_challenge = params.get("hub.challenge")
         
         # Validate required parameters
         if not all([hub_mode, hub_verify_token, hub_challenge]):
@@ -65,7 +66,7 @@ async def verify_webhook(
         
         if result:
             logger.info("Webhook verification successful")
-            return int(hub_challenge)
+            return hub_challenge  # Return as string, no conversion needed
         
         logger.warning("Webhook verification failed")
         raise HTTPException(status_code=403, detail="Verification failed")
