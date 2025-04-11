@@ -66,7 +66,7 @@ async def verify_webhook(request: Request):
         
         if result:
             logger.info("Webhook verification successful")
-            return hub_challenge  # Return as string, no conversion needed
+            return int(hub_challenge)
         
         logger.warning("Webhook verification failed")
         raise HTTPException(status_code=403, detail="Verification failed")
