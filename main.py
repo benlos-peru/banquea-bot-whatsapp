@@ -14,7 +14,7 @@ load_dotenv()
 os.makedirs('logs', exist_ok=True)
 
 # Configure logging to file
-log_level = os.getenv('LOG_LEVEL', 'INFO')
+log_level = DEBUG
 log_file = os.path.join('logs', 'whatsapp_bot.log')
 
 # Configure root logger
