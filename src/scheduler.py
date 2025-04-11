@@ -145,7 +145,7 @@ async def send_random_question(user_id: int, db: Session):
     
     # Create the section for the interactive list
     section = {
-        "title": "Selecciona la respuesta correcta",
+        "title": "Selecciona tu respuesta",
         "rows": rows
     }
     
