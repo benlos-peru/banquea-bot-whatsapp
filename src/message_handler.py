@@ -89,7 +89,9 @@ async def handle_message(db: Session, message: Dict[str, Any]) -> Dict[str, Any]
     elif user.state == UserState.AWAITING_QUESTION_RESPONSE:
         return await handle_question_response(db, user, message)
     elif user.state == UserState.SUBSCRIBED:
-        return await handle_subscribed_user(db, user, message)
+        # Handle subscribed user state
+        logger.info(f"User {user.phone_number} is in SUBSCRIBED state. No specific action required.")
+        return {"status": "success", "action": "no_action_needed"}
     else:
         logger.error(f"Unknown user state: {user.state} for user {from_number}")
         await whatsapp_client.send_text_message(
