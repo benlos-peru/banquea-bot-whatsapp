@@ -139,8 +139,8 @@ async def send_random_question(user_id: int, db: Session):
     for i, answer in enumerate(all_answers):
         rows.append({
             "id": f"answer_{i+1}",
-            "title": answer,
-            "description": ""  # Optional description can be empty
+            "title": f"Opción {i+1}",
+            "description": answer  # Optional description can be empty
         })
     
     # Create the section for the interactive list
