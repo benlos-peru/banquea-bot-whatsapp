@@ -180,6 +180,21 @@ class WhatsAppClient:
                         "title": button_reply.get("title")
                     }
             
+            elif message_type == "button":
+                # Handle direct button messages (from templates)
+                button_data = message.get("button", {})
+                body = button_data.get("text", "")
+                payload = button_data.get("payload", "")
+                
+                logger.info(f"[{request_id}] Button message - Text: {body}, Payload: {payload}")
+                
+                # Treat button messages similar to button_reply for consistency
+                interactive_data = {
+                    "reply_type": "template_button",
+                    "title": body,
+                    "payload": payload
+                }
+            
             # Contact info if available
             contact_name = None
             if "contacts" in value and value["contacts"]:
