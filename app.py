@@ -28,22 +28,28 @@ async def lifespan(app: FastAPI):
         # Shutdown: Run when the application is shutting down
         logger.info("Shutting down WhatsApp bot application...")
 
-# Initialize FastAPI app
-app = FastAPI(
-    title="WhatsApp Bot",
-    description="A WhatsApp bot that sends periodic messages to users",
-    version="1.0.0",
-    lifespan=lifespan
-)
+# Create the FastAPI application
+def create_app() -> FastAPI:
+    app = FastAPI(
+        title="WhatsApp Bot",
+        description="A WhatsApp bot that sends periodic messages to users",
+        version="1.0.0",
+        lifespan=lifespan
+    )
+    
+    # Include routers
+    app.include_router(routes.router)
+    app.include_router(webhook.router)
+    
+    @app.get("/")
+    async def health_check():
+        """Simple health check endpoint"""
+        return {"status": "healthy"}
+        
+    return app
 
-# Include routers
-app.include_router(routes.router)
-app.include_router(webhook.router)
-
-@app.get("/")
-async def health_check():
-    """Simple health check endpoint"""
-    return {"status": "healthy"}
+# Initialize the app at module level
+app = create_app()
 
 if __name__ == "__main__":
     uvicorn.run(
