@@ -121,21 +121,11 @@ async def handle_uncontacted_user(db: Session, user: User, message: Dict[str, An
     # Send welcome template message
     success = await whatsapp_client.send_template_message(
         to_number=from_number,
-        template_name="bienvenida"
+        template_name="primer_contacto"
     )
     
     if not success:
         logger.error(f"Failed to send welcome template to {from_number}")
-        return {"status": "error", "reason": "template_send_failed"}
-    
-    # Send day selection template
-    success = await whatsapp_client.send_template_message(
-        to_number=from_number,
-        template_name="seleccion_dia"
-    )
-    
-    if not success:
-        logger.error(f"Failed to send day selection template to {from_number}")
         return {"status": "error", "reason": "template_send_failed"}
     
     # Update user state
