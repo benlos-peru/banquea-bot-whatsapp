@@ -7,7 +7,7 @@ class UserBase(BaseModel):
     scheduled_hour: int = Field(ge=0, le=23)
     scheduled_day_of_week: int = Field(ge=0, le=6)
     whatsapp_id: str
-    state: int = Field(ge=0, le=3)
+    state: int = Field(ge=0, le=4)
 
 class UserCreate(UserBase):
     pass
@@ -24,4 +24,4 @@ class UserUpdate(BaseModel):
     scheduled_hour: Optional[int] = Field(None, ge=0, le=23)
     scheduled_day_of_week: Optional[int] = Field(None, ge=0, le=6)
     whatsapp_id: Optional[str] = None
-    state: Optional[int] = Field(None, ge=0, le=3)
+    state: Optional[int] = Field(None, ge=0, le=4)

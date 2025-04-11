@@ -101,12 +101,18 @@ async def handle_webhook(request: Request, db: Session = Depends(get_db)):
         if not processed_data:
             logger.warning("No processable data in webhook payload")
             return {"status": "no_data"}
-            
-        # TODO: Implement conversation flow logic here
-        # This will be handled by separate modules for different message types
-        # and conversation states
         
-        return {"status": "success", "processed": processed_data}
+        # Handle status updates differently
+        if processed_data.get("type") == "status_update":
+            logger.info(f"Message status update: {processed_data.get('status')} for message {processed_data.get('message_id')}")
+            return {"status": "success", "type": "status_update"}
+        
+        # Handle actual messages
+        from .message_handler import handle_message
+        result = await handle_message(db, processed_data)
+        logger.info(f"Message handling result: {json.dumps(result)}")
+        
+        return {"status": "success", "result": result}
         
     except json.JSONDecodeError:
         logger.error("Failed to decode webhook payload")

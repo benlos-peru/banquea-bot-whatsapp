@@ -4,9 +4,10 @@ import enum
 
 class UserState(enum.IntEnum):
     UNCONTACTED = 0
-    AWAITING_SCHEDULE = 1
-    SUBSCRIBED = 2
-    AWAITING_RESPONSE = 3
+    AWAITING_DAY = 1
+    AWAITING_HOUR = 2
+    SUBSCRIBED = 3
+    AWAITING_RESPONSE = 4
 
 class User(Base):
     __tablename__ = "users"
