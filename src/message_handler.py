@@ -73,6 +73,10 @@ async def handle_message(db: Session, message: Dict[str, Any]) -> Dict[str, Any]
         db.commit()
         logger.info(f"Updated WhatsApp ID for user {from_number}")
     
+    # Check for special command to get a new question
+    if message_type == "text" and body.strip() == "%%get_new_question$":
+        return await handle_force_new_question(db, user)
+    
     # Process message based on user state
     if user.state == UserState.UNCONTACTED:
         return await handle_uncontacted_user(db, user, message)
@@ -80,6 +84,10 @@ async def handle_message(db: Session, message: Dict[str, Any]) -> Dict[str, Any]
         return await handle_day_selection(db, user, message)
     elif user.state == UserState.AWAITING_HOUR:
         return await handle_hour_selection(db, user, message)
+    elif user.state == UserState.AWAITING_QUESTION_CONFIRMATION:
+        return await handle_question_confirmation(db, user, message)
+    elif user.state == UserState.AWAITING_QUESTION_RESPONSE:
+        return await handle_question_response(db, user, message)
     elif user.state == UserState.SUBSCRIBED:
         return await handle_subscribed_user(db, user, message)
     else:
@@ -237,9 +245,10 @@ async def handle_hour_selection(db: Session, user: User, message: Dict[str, Any]
     
     return {"status": "success", "action": "processed_hour", "selected_hour": hour}
 
-async def handle_subscribed_user(db: Session, user: User, message: Dict[str, Any]) -> Dict[str, Any]:
+async def handle_question_confirmation(db: Session, user: User, message: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Handle messages from already subscribed users.
+    Handle confirmation response before sending a question.
+    Processes the user's choice whether they want to receive a question now.
     
     Args:
         db: Database session
@@ -250,14 +259,188 @@ async def handle_subscribed_user(db: Session, user: User, message: Dict[str, Any
         Dict with processing result
     """
     from_number = user.phone_number
-    body = message.get("body", "").strip().lower()
+    body = message.get("body", "").strip()
+    message_type = message.get("message_type")
     
-    logger.info(f"Message from subscribed user {from_number}: '{body}'")
+    logger.info(f"Processing question confirmation from {from_number}: '{body}'")
     
-    # For now, just acknowledge the message
+    # Extract the response - it could be a button or text
+    user_response = body.lower()
+    
+    # Check for button response type
+    if message_type == "button":
+        payload = message.get("interactive_data", {}).get("payload", "")
+        if payload:
+            user_response = payload.lower()
+    
+    # Handle the confirmation response
+    if user_response in ["quiero repasar", "sí", "si", "yes", "aceptar"]:
+        logger.info(f"User {from_number} confirmed to receive a question")
+        
+        # Import here to avoid circular import
+        from .scheduler import send_random_question
+        
+        # Send a question
+        await send_random_question(user.id, db)
+        
+        return {"status": "success", "action": "sending_question"}
+    
+    elif user_response in ["no quiero repasar", "no", "rechazar"]:
+        logger.info(f"User {from_number} declined to receive a question")
+        
+        # Update user state back to subscribed
+        user.state = UserState.SUBSCRIBED
+        db.commit()
+        
+        # Send acknowledgment
+        await whatsapp_client.send_text_message(
+            to_number=from_number,
+            message_text="Entendido. Te enviaremos la próxima pregunta en tu horario programado."
+        )
+        
+        # Reschedule for next week
+        from .scheduler import schedule_next_question
+        next_time = schedule_next_question(user, db)
+        
+        return {
+            "status": "success", 
+            "action": "question_declined",
+            "next_scheduled": next_time.isoformat()
+        }
+    
+    else:
+        # Unrecognized response, ask again
+        logger.warning(f"Unrecognized confirmation response from {from_number}: '{body}'")
+        
+        await whatsapp_client.send_text_message(
+            to_number=from_number,
+            message_text="Lo siento, no entendí tu respuesta. Por favor, selecciona una de las opciones proporcionadas."
+        )
+        
+        return {"status": "error", "reason": "invalid_confirmation_response"}
+
+async def handle_question_response(db: Session, user: User, message: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Handle user's response to a medical question.
+    
+    Args:
+        db: Database session
+        user: User model instance
+        message: Processed message data
+        
+    Returns:
+        Dict with processing result
+    """
+    from_number = user.phone_number
+    message_type = message.get("message_type")
+    interactive_data = message.get("interactive_data", {})
+    
+    logger.info(f"Processing question response from {from_number}")
+    
+    # Get the most recent unanswered question for this user
+    last_question = db.query(UserQuestion).filter(
+        UserQuestion.user_id == user.id,
+        UserQuestion.answered_at.is_(None)
+    ).order_by(UserQuestion.sent_at.desc()).first()
+    
+    if not last_question:
+        logger.warning(f"No pending question found for user {from_number}")
+        
+        # Update user state
+        user.state = UserState.SUBSCRIBED
+        db.commit()
+        
+        await whatsapp_client.send_text_message(
+            to_number=from_number,
+            message_text="Lo siento, no encontré una pregunta pendiente. Recibirás tu próxima pregunta en el horario programado."
+        )
+        
+        return {"status": "error", "reason": "no_pending_question"}
+    
+    # Handle interactive list response
+    if message_type == "interactive" and interactive_data:
+        reply_type = interactive_data.get("reply_type")
+        
+        if reply_type == "list_reply":
+            answer_id = interactive_data.get("id")
+            answer_title = interactive_data.get("title")
+            
+            if not answer_id or not answer_title:
+                logger.warning(f"Invalid list reply from {from_number}: {interactive_data}")
+                return {"status": "error", "reason": "invalid_list_reply"}
+            
+            # Record the answer
+            last_question.user_answer = answer_title
+            last_question.answered_at = datetime.now(pytz.timezone('America/Lima'))
+            last_question.is_correct = (answer_id == last_question.correct_answer_id)
+            
+            # Update user state
+            user.state = UserState.SUBSCRIBED
+            db.commit()
+            
+            logger.info(f"User {from_number} answered question {last_question.question_id}: " + 
+                       f"'{answer_title}' - Correct: {last_question.is_correct}")
+            
+            # Send feedback based on correctness
+            if last_question.is_correct:
+                await whatsapp_client.send_text_message(
+                    to_number=from_number,
+                    message_text="¡Respuesta correcta! 🎉 Muy bien. Recibirás tu próxima pregunta en el horario programado."
+                )
+            else:
+                await whatsapp_client.send_text_message(
+                    to_number=from_number,
+                    message_text=f"Tu respuesta fue incorrecta. La respuesta correcta es: {last_question.correct_answer}\n\n" +
+                                f"Recibirás tu próxima pregunta en el horario programado."
+                )
+            
+            # Schedule next question
+            from .scheduler import schedule_next_question
+            next_time = schedule_next_question(user, db)
+            
+            return {
+                "status": "success",
+                "action": "processed_answer",
+                "is_correct": last_question.is_correct,
+                "next_scheduled": next_time.isoformat()
+            }
+    
+    # Unrecognized response format
+    logger.warning(f"Unrecognized question response format from {from_number}: {message_type}")
+    
     await whatsapp_client.send_text_message(
         to_number=from_number,
-        message_text="Gracias por tu mensaje. Recibirás tus preguntas según tu horario programado."
+        message_text="Lo siento, no pude procesar tu respuesta. Por favor, selecciona una opción de la lista proporcionada."
     )
     
-    return {"status": "success", "action": "acknowledged_message"}
+    return {"status": "error", "reason": "invalid_response_format"}
+
+async def handle_force_new_question(db: Session, user: User) -> Dict[str, Any]:
+    """
+    Handle special command to force sending a new question.
+    
+    Args:
+        db: Database session
+        user: User model instance
+        
+    Returns:
+        Dict with processing result
+    """
+    from_number = user.phone_number
+    logger.info(f"Handling force new question command from {from_number}")
+    
+    # Only allow this command for subscribed users
+    if user.state not in [UserState.SUBSCRIBED, UserState.AWAITING_QUESTION_CONFIRMATION]:
+        await whatsapp_client.send_text_message(
+            to_number=from_number,
+            message_text="Lo siento, este comando solo está disponible después de completar la configuración inicial."
+        )
+        return {"status": "error", "reason": "invalid_state_for_command"}
+    
+    # Import here to avoid circular import
+    from .scheduler import send_random_question
+    
+    # Send a question directly without changing the schedule
+    await send_random_question(user.id, db)
+    
+    return {"status": "success", "action": "forced_new_question"}
