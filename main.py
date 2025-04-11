@@ -2,12 +2,34 @@ from fastapi import FastAPI
 import uvicorn
 from contextlib import asynccontextmanager
 import logging
+import os
+from logging.handlers import RotatingFileHandler
+from dotenv import load_dotenv
 from src import models, database, routes, webhook
 
-# Configure logging
+# Load environment variables
+load_dotenv()
+
+# Create logs directory if it doesn't exist
+os.makedirs('logs', exist_ok=True)
+
+# Configure logging to file
+log_level = os.getenv('LOG_LEVEL', 'INFO')
+log_file = os.path.join('logs', 'whatsapp_bot.log')
+
+# Configure root logger
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    level=getattr(logging, log_level),
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        # File handler with rotation (10MB max size, keep 5 backup files)
+        RotatingFileHandler(
+            log_file,
+            maxBytes=10*1024*1024,  # 10MB
+            backupCount=5,
+            encoding='utf-8'
+        )
+    ]
 )
 logger = logging.getLogger(__name__)
 
