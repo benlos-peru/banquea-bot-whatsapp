@@ -107,11 +107,11 @@ async def handle_webhook(request: Request, db: Session = Depends(get_db)):
             logger.info(f"Message status update: {processed_data.get('status')} for message {processed_data.get('message_id')}")
             return {"status": "success", "type": "status_update"}
         
-        # Handle actual messages
+        # Handle actual messages through the message handler
         from .message_handler import handle_message
         result = await handle_message(db, processed_data)
-        logger.info(f"Message handling result: {json.dumps(result)}")
         
+        logger.info(f"Message handling result: {json.dumps(result)}")
         return {"status": "success", "result": result}
         
     except json.JSONDecodeError:

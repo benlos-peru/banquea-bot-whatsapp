@@ -45,3 +45,101 @@ def delete_user(user_id: int, db: Session = Depends(database.get_db)):
     if not success:
         raise HTTPException(status_code=404, detail="User not found")
     return {"detail": "User deleted successfully"}
+
+@router.post("/contact/", response_model=dict)
+async def contact_users(
+    limit: int = Query(10, description="Maximum number of users to contact"),
+    db: Session = Depends(database.get_db)
+):
+    """
+    Trigger the contact process for uncontacted users.
+    This endpoint will send initial welcome messages to users in UNCONTACTED state.
+    
+    Args:
+        limit: Maximum number of users to contact in one batch
+        db: Database session
+        
+    Returns:
+        Dict with contact results
+    """
+    from .message_handler import whatsapp_client
+    from .models import UserState
+    import asyncio
+    
+    # Get users in UNCONTACTED state
+    users = db.query(crud.models.User).filter(
+        crud.models.User.state == UserState.UNCONTACTED
+    ).limit(limit).all()
+    
+    if not users:
+        return {"status": "no_users", "contacted": 0}
+    
+    success_count = 0
+    failed_count = 0
+    results = []
+    
+    # Contact each user
+    for user in users:
+        try:
+            # Send welcome message
+            welcome_success = await whatsapp_client.send_template_message(
+                to_number=user.phone_number,
+                template_name="bienvenida"
+            )
+            
+            if not welcome_success:
+                results.append({
+                    "phone_number": user.phone_number,
+                    "status": "failed",
+                    "reason": "welcome_template_failed"
+                })
+                failed_count += 1
+                continue
+            
+            # Small delay to avoid rate limiting
+            await asyncio.sleep(1)
+            
+            # Send day selection message
+            day_success = await whatsapp_client.send_template_message(
+                to_number=user.phone_number,
+                template_name="seleccion_dia"
+            )
+            
+            if not day_success:
+                results.append({
+                    "phone_number": user.phone_number,
+                    "status": "partial",
+                    "reason": "day_template_failed"
+                })
+                failed_count += 1
+                continue
+            
+            # Update user state
+            user.state = UserState.AWAITING_DAY
+            db.commit()
+            
+            results.append({
+                "phone_number": user.phone_number,
+                "status": "success"
+            })
+            success_count += 1
+            
+            # Small delay between users
+            await asyncio.sleep(2)
+            
+        except Exception as e:
+            db.rollback()
+            results.append({
+                "phone_number": user.phone_number,
+                "status": "error",
+                "reason": str(e)
+            })
+            failed_count += 1
+    
+    return {
+        "status": "completed",
+        "total": len(users),
+        "success": success_count,
+        "failed": failed_count,
+        "results": results
+    }

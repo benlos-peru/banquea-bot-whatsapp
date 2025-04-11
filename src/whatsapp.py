@@ -1,33 +1,30 @@
-import requests
-import logging
+import httpx
 import os
-import json
-from typing import Dict, Any, List, Optional
 from dotenv import load_dotenv
+import json
+import logging
+import requests
+import uuid
+from typing import Dict, Any, Optional, List
 
-# Load environment variables
 load_dotenv()
 
 logger = logging.getLogger(__name__)
 
 class WhatsAppClient:
-    """WhatsApp Cloud API Client for sending and receiving messages"""
-    
     def __init__(self):
-        """Initialize the WhatsApp client with configuration from environment variables"""
-        self.api_version = "v22.0"
-        self.base_url = f"https://graph.facebook.com/{self.api_version}"
-        self.phone_number_id = os.getenv("WHATSAPP_PHONE_NUMBER_ID")
-        self.access_token = os.getenv("WHATSAPP_ACCESS_TOKEN")
-        self.verify_token = os.getenv("WHATSAPP_VERIFY_TOKEN")
-        
-        if not all([self.phone_number_id, self.access_token, self.verify_token]):
-            logger.error("Missing required WhatsApp API configuration")
-            raise ValueError("Missing required WhatsApp API configuration")
-            
-        logger.info(f"WhatsApp client initialized for phone number ID: {self.phone_number_id}")
+        # Phone number ID (not the display phone number)
+        self.phone_number_id = os.getenv("WHATSAPP_PHONE_NUMBER_ID", "")
+        # WhatsApp Business Account ID
+        self.waba_id = os.getenv("WHATSAPP_BUSINESS_ACCOUNT_ID", "")
+        # Base URL for the WhatsApp Cloud API
+        self.api_url = "https://graph.facebook.com/v22.0"
+        # Access token
+        self.access_token = os.getenv("WHATSAPP_ACCESS_TOKEN", "")
+        # Verify token for webhook
+        self.verify_token = os.getenv("WHATSAPP_VERIFY_TOKEN", "banquea_medical_bot_verify_token")
     
-    def verify_webhook(self, mode: str, token: str, challenge: str) -> bool:
+    def verify_webhook(self, mode: str, token: str, challenge: str) -> Optional[str]:
         """
         Verify the webhook for WhatsApp Cloud API.
         
@@ -37,13 +34,15 @@ class WhatsAppClient:
             challenge: The hub.challenge parameter
             
         Returns:
-            bool: True if verification passes, False otherwise
+            str: The challenge string if verification passes, None otherwise
         """
-        logger.info("Verifying webhook...")
+        logger.info("Starting webhook verification...")
+        logger.info(f"Received parameters - mode: {mode}, token: [REDACTED], challenge: {challenge}")
+        logger.info(f"Expected verify_token: [REDACTED] (first 3 chars: {self.verify_token[:3] if self.verify_token else 'None'})")
         
         if mode == "subscribe" and token == self.verify_token:
-            logger.info("Webhook verified successfully")
-            return True
+            logger.info("WEBHOOK_VERIFIED: Mode and token match")
+            return challenge
         
         # Log specific verification failure reason
         if mode != "subscribe":
@@ -53,8 +52,8 @@ class WhatsAppClient:
         else:
             logger.warning("Webhook verification failed: Unknown reason")
         
-        return False
-    
+        return None
+        
     def process_webhook_payload(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """
         Process incoming webhook payload from WhatsApp.
@@ -66,7 +65,7 @@ class WhatsAppClient:
             Dict with extracted message information
         """
         try:
-            request_id = payload.get("id", "unknown")
+            request_id = str(uuid.uuid4())[:8]  # Generate a short request ID for logging
             logger.info(f"[{request_id}] Processing webhook payload")
             
             # Check for required fields
@@ -216,19 +215,19 @@ class WhatsAppClient:
             except:
                 logger.error(f"Could not serialize problem payload")
             return {}
-
-    async def send_text_message(self, to_number: str, message: str) -> bool:
+            
+    async def send_text_message(self, to_number: str, message_text: str) -> bool:
         """
         Send a plain text message to a WhatsApp user.
         
         Args:
             to_number: The recipient's phone number
-            message: The message text to send
+            message_text: The message text to send
             
         Returns:
             bool: True if successful, False otherwise
         """
-        endpoint = f"{self.base_url}/{self.phone_number_id}/messages"
+        endpoint = f"{self.api_url}/{self.phone_number_id}/messages"
         headers = {
             "Authorization": f"Bearer {self.access_token}",
             "Content-Type": "application/json"
@@ -241,12 +240,12 @@ class WhatsAppClient:
             "type": "text",
             "text": {
                 "preview_url": False,
-                "body": message
+                "body": message_text
             }
         }
         
         try:
-            logger.info(f"Sending text message to {to_number}: {message[:50]}...")
+            logger.info(f"Sending text message to {to_number}: {message_text[:50]}...")
             response = requests.post(endpoint, headers=headers, json=payload)
             response_data = response.json()
             
@@ -260,7 +259,7 @@ class WhatsAppClient:
         except Exception as e:
             logger.error(f"Error sending message: {str(e)}", exc_info=True)
             return False
-    
+            
     async def send_template_message(self, to_number: str, template_name: str, language: str = "es", components: List[Dict] = None) -> bool:
         """
         Send a template message to a WhatsApp user.
@@ -274,7 +273,7 @@ class WhatsAppClient:
         Returns:
             bool: True if successful, False otherwise
         """
-        endpoint = f"{self.base_url}/{self.phone_number_id}/messages"
+        endpoint = f"{self.api_url}/{self.phone_number_id}/messages"
         headers = {
             "Authorization": f"Bearer {self.access_token}",
             "Content-Type": "application/json"
@@ -313,6 +312,64 @@ class WhatsAppClient:
         except Exception as e:
             logger.error(f"Error sending template message: {str(e)}", exc_info=True)
             return False
-
-# Create a singleton instance
-whatsapp_client = WhatsAppClient()
+    
+    async def send_interactive_list_message(self, to_number: str, header_text: str, body_text: str, footer_text: str, button_text: str, sections: List[Dict]) -> bool:
+        """
+        Send an interactive list message to a WhatsApp user.
+        
+        Args:
+            to_number: The recipient's phone number
+            header_text: Text for the header section
+            body_text: Text for the main body section
+            footer_text: Text for the footer section
+            button_text: Text for the button that opens the list
+            sections: List of sections with rows (options)
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        endpoint = f"{self.api_url}/{self.phone_number_id}/messages"
+        headers = {
+            "Authorization": f"Bearer {self.access_token}",
+            "Content-Type": "application/json"
+        }
+        
+        payload = {
+            "messaging_product": "whatsapp",
+            "recipient_type": "individual",
+            "to": to_number,
+            "type": "interactive",
+            "interactive": {
+                "type": "list",
+                "header": {
+                    "type": "text",
+                    "text": header_text
+                },
+                "body": {
+                    "text": body_text
+                },
+                "footer": {
+                    "text": footer_text
+                },
+                "action": {
+                    "button": button_text,
+                    "sections": sections
+                }
+            }
+        }
+        
+        try:
+            logger.info(f"Sending interactive list message to {to_number}")
+            response = requests.post(endpoint, headers=headers, json=payload)
+            response_data = response.json()
+            
+            if response.status_code == 200:
+                logger.info(f"Interactive list message sent successfully. Message ID: {response_data.get('messages', [{}])[0].get('id')}")
+                return True
+            else:
+                logger.error(f"Failed to send interactive list message. Status code: {response.status_code}, Response: {json.dumps(response_data)}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Error sending interactive list message: {str(e)}", exc_info=True)
+            return False
