@@ -21,11 +21,34 @@ async def verify_webhook(
     """
     Verify webhook endpoint for WhatsApp Cloud API.
     This endpoint is called by WhatsApp when setting up the webhook.
+    Returns 403 if verification fails, 400 if parameters are missing/invalid.
     """
     try:
         logger.info("Received webhook verification request")
         
-        # Log parameters safely
+        # Validate required parameters
+        if not all([hub_mode, hub_verify_token, hub_challenge]):
+            missing_params = []
+            if not hub_mode:
+                missing_params.append("hub.mode")
+            if not hub_verify_token:
+                missing_params.append("hub.verify_token")
+            if not hub_challenge:
+                missing_params.append("hub.challenge")
+            
+            error_msg = f"Missing required parameters: {', '.join(missing_params)}"
+            logger.warning(error_msg)
+            raise HTTPException(status_code=400, detail=error_msg)
+        
+        # Validate challenge is numeric
+        try:
+            int(hub_challenge)
+        except ValueError:
+            error_msg = "hub.challenge must be numeric"
+            logger.warning(error_msg)
+            raise HTTPException(status_code=400, detail=error_msg)
+            
+        # Log parameters safely (after validation)
         logger.info(
             "Verification parameters - "
             f"mode: {hub_mode}, "
