@@ -62,7 +62,7 @@ async def contact_users(
     Returns:
         Dict with contact results
     """
-    from .message_handler import whatsapp_client
+    from .message_handler import whatsapp_client, handle_uncontacted_user
     from .models import UserState
     import asyncio
     
@@ -81,35 +81,14 @@ async def contact_users(
     # Contact each user
     for user in users:
         try:
-            # Send welcome message
-            welcome_success = await whatsapp_client.send_template_message(
-                to_number=user.phone_number,
-                template_name="bienvenida"
-            )
+            # Use the handle_uncontacted_user method to manage user contact
+            contact_result = await handle_uncontacted_user(db, user, {"phone_number": user.phone_number})
             
-            if not welcome_success:
+            if not contact_result["success"]:
                 results.append({
                     "phone_number": user.phone_number,
                     "status": "failed",
-                    "reason": "welcome_template_failed"
-                })
-                failed_count += 1
-                continue
-            
-            # Small delay to avoid rate limiting
-            await asyncio.sleep(1)
-            
-            # Send day selection message
-            day_success = await whatsapp_client.send_template_message(
-                to_number=user.phone_number,
-                template_name="seleccion_dia"
-            )
-            
-            if not day_success:
-                results.append({
-                    "phone_number": user.phone_number,
-                    "status": "partial",
-                    "reason": "day_template_failed"
+                    "reason": contact_result.get("reason", "unknown_error")
                 })
                 failed_count += 1
                 continue
