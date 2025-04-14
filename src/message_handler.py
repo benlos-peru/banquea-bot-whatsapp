@@ -435,6 +435,7 @@ async def handle_force_new_question(db: Session, user: User) -> Dict[str, Any]:
     from .scheduler import send_random_question
     
     # Send a question directly without changing the schedule
-    await send_random_question(user.id, db)
+    # Pass only user.id as send_random_question creates its own DB session
+    await send_random_question(user.id)
     
     return {"status": "success", "action": "forced_new_question"}
