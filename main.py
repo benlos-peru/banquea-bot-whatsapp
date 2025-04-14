@@ -6,6 +6,10 @@ import os
 from logging.handlers import RotatingFileHandler
 from dotenv import load_dotenv
 from src import models, database, routes, webhook
+# Import scheduler functions
+from src.scheduler import start_scheduler, shutdown_scheduler 
+# Import SessionLocal for scheduler startup
+from src.database import SessionLocal 
 
 # Load environment variables
 load_dotenv()
@@ -35,20 +39,36 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """
+    \"\"\"
     Lifespan context manager for FastAPI application.
     Handles startup and shutdown events.
-    """
+    \"\"\"
     # Startup: Run before the application starts accepting requests
+    db = None # Initialize db to None
     try:
-        logger.info("Starting WhatsApp bot application...")
+        logger.info(\"Starting WhatsApp bot application...\")
         # Create database tables
         models.Base.metadata.create_all(bind=database.engine)
-        logger.info("Database tables created successfully")
-        yield
+        logger.info(\"Database tables created successfully\")
+        
+        # Get a DB session for starting the scheduler
+        db = SessionLocal()
+        # Start the scheduler
+        start_scheduler(db)
+        logger.info(\"Scheduler started and initial jobs scheduled\")
+        
+        yield # Application runs here
+        
     finally:
         # Shutdown: Run when the application is shutting down
-        logger.info("Shutting down WhatsApp bot application...")
+        logger.info(\"Shutting down WhatsApp bot application...\")
+        # Shutdown the scheduler
+        shutdown_scheduler()
+        logger.info(\"Scheduler shut down\")
+        # Close the DB session if it was opened
+        if db:
+            db.close()
+            logger.info(\"Scheduler DB session closed\")
 
 # Create the FastAPI application
 def create_app() -> FastAPI:
