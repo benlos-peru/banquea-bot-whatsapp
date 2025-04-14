@@ -1,4 +1,3 @@
-from .message_handler import handle_message 
 from fastapi import APIRouter, Request, HTTPException, Depends
 from sqlalchemy.orm import Session
 import logging
@@ -78,55 +77,47 @@ async def verify_webhook(request: Request):
 
 @router.post("/webhook")
 async def handle_webhook(request: Request, db: Session = Depends(get_db)):
-    \"\"\"
+    """
     Main webhook endpoint for receiving WhatsApp messages and updates.
     This endpoint handles all incoming messages and interactions from WhatsApp.
-    \"\"\"
-    processed_data = {} # Initialize to handle potential errors before assignment
-    request_id = 'N/A' # Initialize request_id
+    """
     try:
         # Get the raw payload
         body = await request.json()
-        # logger.debug(f"Received webhook payload: {json.dumps(body)}") # Keep debug lower if too verbose
+        logger.debug(f"Received webhook payload: {json.dumps(body)}")
         
         # Initial validation
         if not isinstance(body, dict):
-            raise HTTPException(status_code=400, detail=\"Invalid payload format\")
+            raise HTTPException(status_code=400, detail="Invalid payload format")
             
         # Verify this is a WhatsApp Business Account webhook
-        if body.get(\"object\") != \"whatsapp_business_account\":
-            logger.info(\"Received non-WhatsApp webhook, ignoring\")
-            return {\"status\": \"ignored\"}
+        if body.get("object") != "whatsapp_business_account":
+            logger.info("Received non-WhatsApp webhook, ignoring")
+            return {"status": "ignored"}
             
         # Process the webhook payload
         processed_data = whatsapp_client.process_webhook_payload(body)
-        request_id = processed_data.get('request_id', 'N/A') # Get request_id after processing
         
         if not processed_data:
-            logger.info(f\"[{request_id}] Webhook payload did not result in processable data.\")
-            return {\"status\": \"no_action_needed\"}
-            
-        # Check if it's a message type that needs handling
-        if processed_data.get(\"type\") == \"message\":
-            logger.info(f\"[{request_id}] Passing message to handler\")
-            # Call the main message handler
-            handler_result = await handle_message(db, processed_data)
-            logger.info(f\"[{request_id}] Message handler result: {handler_result}\")
-            # Return 200 OK to WhatsApp immediately
-            return {\"status\": \"processed\"} 
-        elif processed_data.get(\"type\") == \"status_update\":
-             logger.info(f\"[{request_id}] Status update received, no handler action needed.\")
-             return {\"status\": \"status_update_received\"}
-        else:
-            logger.warning(f\"[{request_id}] Unhandled processed data type: {processed_data.get('type')}\")
-            return {\"status\": \"unhandled_type\"}
-
-    except HTTPException as http_exc:
-        # Re-raise HTTPExceptions to let FastAPI handle them
-        logger.error(f\"[{request_id}] HTTP error processing webhook: {http_exc.detail}\", exc_info=True)
-        raise http_exc
+            logger.warning("No processable data in webhook payload")
+            return {"status": "no_data"}
+        
+        # Handle status updates differently
+        if processed_data.get("type") == "status_update":
+            logger.info(f"Message status update: {processed_data.get('status')} for message {processed_data.get('message_id')}")
+            return {"status": "success", "type": "status_update"}
+        
+        # Handle actual messages through the message handler
+        from .message_handler import handle_message
+        result = await handle_message(db, processed_data)
+        
+        logger.info(f"Message handling result: {json.dumps(result)}")
+        return {"status": "success", "result": result}
+        
+    except json.JSONDecodeError:
+        logger.error("Failed to decode webhook payload")
+        raise HTTPException(status_code=400, detail="Invalid JSON payload")
+        
     except Exception as e:
-        logger.error(f\"[{request_id}] Error processing webhook: {str(e)}\", exc_info=True)
-        # Return a 500 error response for internal errors
-        # Avoid returning detailed error messages in production if possible
-        raise HTTPException(status_code=500, detail=\"Internal server error processing webhook\")
+        logger.error(f"Error processing webhook: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
