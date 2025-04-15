@@ -288,50 +288,41 @@ async def handle_question_confirmation(db: Session, user: User, message: Dict[st
             user_response = payload.lower()
     
     # Handle the confirmation response
-    if user_response in ["listo", "sí", "si", "yes", "aceptar", "Estoy", "estoy"]:
+    # Check if the response indicates readiness (accept the specific payload)
+    if user_response in ["estoy listo reforzar", "Estoy listo para reforzar", "estoy listo para reforzar", "si", "sí", "ok"]:
         logger.info(f"User {from_number} confirmed to receive a question")
         
         # Import here to avoid circular import
         from .scheduler import send_random_question
         
-        # Send a question
-        await send_random_question(user.id, db)
+        # Send a question immediately (no need for db session here, send_random_question creates its own)
+        await send_random_question(user.id)
         
         return {"status": "success", "action": "sending_question"}
     
-    elif user_response in ["Hoy no quiero repasar", "no", "rechazar"]:
-        logger.info(f"User {from_number} declined to receive a question")
-        
-        # Update user state back to subscribed
-        user.state = UserState.SUBSCRIBED
+    # Handle negative confirmation or unrecognized response
+    elif user_response in ["Hoy no quiero repasar", "hoy no quiero repasar", "no", "no quiero", "no quiero repasar", "no quiero reforzar"]:
+        logger.info(f"User {from_number} declined to receive a question now")
+        # Reschedule for the next planned time
+        user.state = UserState.SUBSCRIBED # Put back into subscribed state
         db.commit()
-        
-        # Send acknowledgment
-        await whatsapp_client.send_text_message(
-            to_number=from_number,
-            message_text="Entendido. Te enviaremos la próxima pregunta en tu horario programado."
-        )
-        
-        # Reschedule for next week
         from .scheduler import schedule_next_question
         next_time = schedule_next_question(user, db)
-        
-        return {
-            "status": "success", 
-            "action": "question_declined",
-            "next_scheduled": next_time.isoformat()
-        }
-    
-    else:
-        # Unrecognized response, ask again
-        logger.warning(f"Unrecognized confirmation response from {from_number}: '{body}'")
-        
         await whatsapp_client.send_text_message(
             to_number=from_number,
-            message_text="Lo siento, no entendí tu respuesta. Por favor, selecciona una de las opciones proporcionadas."
+            message_text="Entendido. Te preguntaré de nuevo en tu próximo horario programado."
         )
+        return {"status": "success", "action": "confirmation_declined", "next_scheduled": next_time.isoformat() if next_time else None}
         
-        return {"status": "error", "reason": "invalid_confirmation_response"}
+    else:
+        # Unrecognized response
+        logger.warning(f"Unrecognized confirmation response from {from_number}: '{body}' (parsed as '{user_response}')")
+        await whatsapp_client.send_text_message(
+            to_number=from_number,
+            message_text="Lo siento, no entendí tu respuesta. Por favor, selecciona una de las opciones."
+        )
+        # Keep user in AWAITING_QUESTION_CONFIRMATION state
+        return {"status": "error", "reason": "unrecognized_confirmation"}
 
 async def handle_question_response(db: Session, user: User, message: Dict[str, Any]) -> Dict[str, Any]:
     """
