@@ -156,9 +156,10 @@ def list_users(db: Session, limit: int = 50) -> List[User]:
                 state_name = state_name_attr
                 break
         
+        # Print hour and minute
         logger.info(f"ID: {user.id}, Phone: {user.phone_number}, Username: {user.username}, "
                    f"State: {user.state} ({state_name}), "
-                   f"Day: {user.scheduled_day_of_week}, Hour: {user.scheduled_hour}")
+                   f"Day: {user.scheduled_day_of_week}, Hour: {user.scheduled_hour:02d}:{getattr(user, 'scheduled_minute', 0):02d}")
     
     return users
 
