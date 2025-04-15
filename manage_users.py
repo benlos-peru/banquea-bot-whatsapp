@@ -33,6 +33,7 @@ Base.metadata.create_all(bind=engine)
 def add_specific_users(db: Session, users_info: List[Dict]) -> List[User]:
     """
     Add specific users with provided phone numbers and usernames.
+    Fills in default values for required fields if missing.
     
     Args:
         db: Database session
@@ -44,45 +45,23 @@ def add_specific_users(db: Session, users_info: List[Dict]) -> List[User]:
     created_users = []
     
     for user_info in users_info:
-        phone_number = user_info["phone_number"]
-        username = user_info.get("username", f"user_{phone_number[-4:]}")
-        
-        # Check if user already exists
-        existing_user = crud.get_user_by_phone(db, phone_number)
-        if existing_user:
-            logger.info(f"User with phone {phone_number} already exists, updating.")
-            # Update the existing user if needed
-            try:
-                update_data = schemas.UserUpdate(
-                    username=username,
-                    state=UserState.UNCONTACTED
-                )
-                updated_user = crud.update_user(db, existing_user.id, update_data)
-                created_users.append(updated_user)
-                logger.info(f"Updated user: {username} with phone: {phone_number}")
-            except Exception as e:
-                logger.error(f"Error updating user: {str(e)}")
-            continue
-        
-        # Create new user
-        user_data = schemas.UserCreate(
-            phone_number=phone_number,
-            username=username,
-            scheduled_hour=12,  # Default hour
-            scheduled_day_of_week=1,  # Default day (Tuesday)
-            whatsapp_id="",  # Will be filled when user first interacts
-            state=UserState.UNCONTACTED
-        )
-        
+        # Fill in defaults for required fields if missing
+        user_data = user_info.copy()
+        user_data.setdefault("scheduled_hour", 9)
+        user_data.setdefault("scheduled_minute", 0)
+        user_data.setdefault("scheduled_day_of_week", 0)
+        user_data.setdefault("whatsapp_id", None)
+        user_data.setdefault("state", 0)
         try:
-            new_user = crud.create_user(db, user_data)
-            if new_user:
-                logger.info(f"Created user: {username} with phone: {phone_number}")
-                created_users.append(new_user)
+            user_create = schemas.UserCreate(**user_data)
+            user = crud.create_user(db, user_create)
+            if user:
+                logger.info(f"Created user: {user.username} with phone: {user.phone_number}")
+                created_users.append(user)
             else:
-                logger.error(f"Failed to create user with phone: {phone_number}")
+                logger.error(f"Failed to create user with phone: {user_data.get('phone_number')}")
         except Exception as e:
-            logger.error(f"Error creating user: {str(e)}")
+            logger.error(f"Exception creating user with phone: {user_data.get('phone_number')}: {e}")
     
     return created_users
 
