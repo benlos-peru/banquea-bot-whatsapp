@@ -164,9 +164,11 @@ async def send_random_question(user_id: int):
             for i, answer in enumerate(all_answers):
                 letter = letters[i]
                 answer_map[letter] = answer
-                message_body_parts.append(f"\\n{letter}. {answer}") # Add letter and answer to body
+                # Use single backslash for actual newline
+                message_body_parts.append(f"\n{letter}. {answer}") 
                 
-            final_message_body = "\\n".join(message_body_parts)
+            # Join with single backslash for actual newline
+            final_message_body = "\n".join(message_body_parts)
             
             # Find the letter corresponding to the correct answer
             correct_answer_letter = None
