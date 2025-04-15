@@ -6,7 +6,8 @@ from typing import Dict, Any, List, Optional
 from sqlalchemy.orm import Session
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
-from apscheduler.executors.pool import ThreadPoolExecutor
+# Use AsyncIOExecutor instead of ThreadPoolExecutor for async jobs
+from apscheduler.executors.asyncio import AsyncIOExecutor 
 
 # Import SessionLocal for creating sessions within jobs
 from .database import SessionLocal 
@@ -25,9 +26,9 @@ jobstores = {
     'default': SQLAlchemyJobStore(url='sqlite:///scheduler.sqlite')
 }
 
-# Create executors
+# Create executors - Use AsyncIOExecutor for async functions
 executors = {
-    'default': ThreadPoolExecutor(10)
+    'default': AsyncIOExecutor()
 }
 
 # Create the scheduler
