@@ -215,6 +215,12 @@ def schedule_next_question(user: User, db: Session):
     # Ensure user object is up-to-date within the session if needed
     db.refresh(user) 
     
+    # --- Add state check --- 
+    if user.state != UserState.SUBSCRIBED:
+        logger.warning(f"User {user.phone_number} (ID: {user.id}) is not in SUBSCRIBED state ({user.state}). Skipping scheduling.")
+        return None
+    # --- End state check ---
+    
     if user.scheduled_day_of_week is None or user.scheduled_hour is None:
         logger.warning(f"User {user.phone_number} (ID: {user.id}) has no schedule set. Skipping scheduling.")
         return None
