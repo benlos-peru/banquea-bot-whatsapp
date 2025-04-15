@@ -23,7 +23,6 @@ class User(Base):
     scheduled_day_of_week = Column(Integer)  # 0-6 (Monday-Sunday)
     whatsapp_id = Column(String, unique=True, nullable=True) # Allow nullable initially
     state = Column(Integer, default=UserState.UNCONTACTED)
-    # next_question_at = Column(DateTime, nullable=True) # Can be removed if using APScheduler jobs
     last_interaction_at = Column(DateTime, default=datetime.utcnow)
     
     # Relationship to track questions sent to this user

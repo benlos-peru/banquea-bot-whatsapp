@@ -1,5 +1,6 @@
 import logging
-import random
+import random # Add random import
+import string # Add string import
 import pytz
 from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional
@@ -155,29 +156,56 @@ async def send_random_question(user_id: int):
             all_answers = [correct_answer] + incorrect_answers
             random.shuffle(all_answers)
             
-            # Create section rows for the interactive list
-            rows = []
+            # Assign letters (A, B, C...) and build message body
+            message_body_parts = [question_text]
+            answer_map = {} # To store letter -> answer text and find correct letter
+            letters = list(string.ascii_uppercase[:len(all_answers)]) # Get letters A, B, C... up to the number of answers
+            
             for i, answer in enumerate(all_answers):
+                letter = letters[i]
+                answer_map[letter] = answer
+                message_body_parts.append(f"\\n{letter}. {answer}") # Add letter and answer to body
+                
+            final_message_body = "\\n".join(message_body_parts)
+            
+            # Find the letter corresponding to the correct answer
+            correct_answer_letter = None
+            for letter, text in answer_map.items():
+                if text == correct_answer:
+                    correct_answer_letter = letter
+                    break
+            
+            if not correct_answer_letter:
+                 logger.error(f"Could not find correct answer letter for question {question_id}")
+                 # Handle error appropriately, maybe skip sending
+                 return
+
+            # Create section rows for the interactive list using letters
+            rows = []
+            for letter in letters:
+                answer_text = answer_map[letter]
+                # Truncate description to 72 chars
+                description = (answer_text[:70] + '..') if len(answer_text) > 72 else answer_text
                 rows.append({
-                    "id": f"answer_{i+1}",
-                    "title": f"Opción {i+1}",
-                    "description": answer  # Optional description can be empty
+                    "id": letter, # Use the letter as the ID
+                    "title": letter, # Show the letter as the title
+                    "description": description
                 })
             
             # Create the section for the interactive list
             section = {
-                "title": "Selecciona tu respuesta",
+                "title": "Selecciona la letra", # Updated title
                 "rows": rows
             }
             
-            # Record this question for the user
+            # Record this question for the user, saving the correct letter
             user_question = UserQuestion(
                 user_id=user_id,
                 question_id=question_id,
-                question_text=question_text,
-                correct_answer=correct_answer,
+                question_text=question_text, # Store original question text without options
+                correct_answer=correct_answer, # Still store the full correct answer text
                 sent_at=datetime.now(LIMA_TZ),
-                correct_answer_id=f"answer_{all_answers.index(correct_answer) + 1}"
+                correct_answer_id=correct_answer_letter # Store the LETTER (e.g., 'A')
             )
             db.add(user_question)
             
@@ -187,12 +215,12 @@ async def send_random_question(user_id: int):
             
             logger.info(f"Sending question to user {user.phone_number} (ID: {user_id}): question_id={question_id}")
             
-            # Send the question
+            # Send the question using the modified body and sections
             await whatsapp_client.send_interactive_list_message(
                 to_number=user.phone_number,
                 header_text="Pregunta Médica",
-                body_text=question_text,
-                footer_text="Selecciona la respuesta que consideres correcta.",
+                body_text=final_message_body, # Use the body with question and lettered answers
+                footer_text="Selecciona la letra de la respuesta correcta.", # Updated footer
                 button_text="Ver Opciones",
                 sections=[section]
             )

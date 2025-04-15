@@ -46,7 +46,7 @@ def delete_user(user_id: int, db: Session = Depends(database.get_db)):
         raise HTTPException(status_code=404, detail="User not found")
     return {"detail": "User deleted successfully"}
 
-@router.post("/contact/", response_model=dict)
+@router.post("/contact", response_model=dict)
 async def contact_users(
     limit: int = Query(10, description="Maximum number of users to contact"),
     db: Session = Depends(database.get_db)
