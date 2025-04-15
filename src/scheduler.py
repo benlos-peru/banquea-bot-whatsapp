@@ -70,7 +70,7 @@ async def send_question_confirmation(user_id: int):
             # Send confirmation template
             await whatsapp_client.send_template_message(
                 to_number=user.phone_number,
-                template_name="confirmar_interaccion"
+                template_name="confirmacion_pregunta"
             )
             logger.info(f"Successfully sent confirmation template to user {user.phone_number} (ID: {user_id})")
 
@@ -222,34 +222,34 @@ def schedule_next_question(user: User, db: Session):
     now = datetime.now(LIMA_TZ)
     scheduled_day = user.scheduled_day_of_week
     scheduled_hour = user.scheduled_hour
+    scheduled_minute = user.scheduled_minute # Get the minute
     
     # Calculate days until next scheduled day
     days_ahead = scheduled_day - now.weekday()
-    if days_ahead <= 0:  # Target day already happened this week
+    if days_ahead < 0: # Target day already happened this week (e.g., today is Wed(2), target is Mon(0)) 
         days_ahead += 7
-    
+    elif days_ahead == 0: # Target day is today
+        # Check if the time has already passed today
+        current_time_in_lima = now.time()
+        target_time = datetime.min.time().replace(hour=scheduled_hour, minute=scheduled_minute)
+        if current_time_in_lima >= target_time:
+            days_ahead += 7 # Schedule for next week if time already passed today
+            
     # Create the scheduled datetime in the correct timezone
     next_date = now.date() + timedelta(days=days_ahead)
-    next_run_time = LIMA_TZ.localize(
-        datetime.combine(next_date, datetime.min.time()) + timedelta(hours=scheduled_hour)
-    )
+    # Combine date with scheduled hour and minute
+    next_run_time_naive = datetime.combine(next_date, datetime.min.time().replace(hour=scheduled_hour, minute=scheduled_minute))
+    next_run_time = LIMA_TZ.localize(next_run_time_naive)
     
-    # If the scheduled time is in the past, add a week
+    # This check might be redundant now due to the days_ahead logic, but keep for safety
     if next_run_time < now:
+        logger.warning(f"Calculated next_run_time {next_run_time} is in the past compared to {now}. Adding 7 days.")
         next_run_time += timedelta(days=7)
     
     logger.info(f"Scheduling next question confirmation for user {user.phone_number} (ID: {user.id}) at {next_run_time}")
     
     # Schedule the job
     job_id = f"question_confirmation_{user.id}"
-    
-    # Remove existing job if it exists (optional, replace_existing=True handles this)
-    # if scheduler.get_job(job_id):
-    #    try:
-    #        scheduler.remove_job(job_id)
-    #        logger.info(f"Removed existing job {job_id} for user {user.phone_number}")
-    #    except JobLookupError:
-    #        logger.info(f"Job {job_id} already removed or finished.")
             
     # Add new job - Pass only the user_id, not the db session
     try:

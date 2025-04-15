@@ -186,7 +186,7 @@ async def handle_day_selection(db: Session, user: User, message: Dict[str, Any])
 async def handle_hour_selection(db: Session, user: User, message: Dict[str, Any]) -> Dict[str, Any]:
     """
     Handle hour selection from a user in AWAITING_HOUR state.
-    Parse the hour, save it to DB, send confirmation, and update state.
+    Parse the hour in HH:MM format, save it to DB, send confirmation, and update state.
     
     Args:
         db: Database session
@@ -201,33 +201,44 @@ async def handle_hour_selection(db: Session, user: User, message: Dict[str, Any]
     
     logger.info(f"Processing hour selection from {from_number}: '{body}'")
     
-    # Validate hour format
+    # Validate hour format (HH:MM)
     try:
-        hour = int(body)
-        if hour < 0 or hour > 23:
-            raise ValueError("Hour out of range")
-    except ValueError:
+        # Attempt to parse HH:MM format
+        time_parts = body.split(':')
+        if len(time_parts) != 2:
+            raise ValueError("Invalid format, expected HH:MM")
+            
+        hour_str, minute_str = time_parts
+        hour = int(hour_str)
+        minute = int(minute_str) # Validate minute part as well
+        
+        if not (0 <= hour <= 23 and 0 <= minute <= 59):
+            raise ValueError("Hour or minute out of range")
+            
+    except ValueError as e:
         # Send error message
+        error_message = "La hora seleccionada no es válida. Por favor, ingresa la hora en formato HH:MM (por ejemplo, 09:30 o 14:00)."
         await whatsapp_client.send_text_message(
             to_number=from_number,
-            message_text="La hora seleccionada no es válida. Por favor, ingresa un número entre 0 y 23."
+            message_text=error_message
         )
-        logger.warning(f"Invalid hour from {from_number}: '{body}'")
-        return {"status": "error", "reason": "invalid_hour"}
+        logger.warning(f"Invalid time format from {from_number}: '{body}'. Error: {e}")
+        return {"status": "error", "reason": "invalid_hour_format"}
     
-    # Save selected hour to database
+    # Save selected hour and minute to database
     user.scheduled_hour = hour
+    user.scheduled_minute = minute # Save the minute
     user.state = UserState.SUBSCRIBED
     db.commit()
     
-    logger.info(f"User {from_number} selected hour: {hour}")
+    logger.info(f"User {from_number} selected time: {hour:02d}:{minute:02d} (Day: {user.scheduled_day_of_week})")
     
     # Get day name for confirmation message
     day_name = DAY_NAMES.get(user.scheduled_day_of_week, "día desconocido")
     
-    # Send confirmation message
+    # Send confirmation message (using the selected hour and minute)
     confirmation_msg = (
-        f"¡Perfecto! Has programado recibir tus preguntas cada {day_name} a las {hour}:00 horas. "
+        f"¡Perfecto! Has programado recibir tus preguntas cada {day_name} a las {hour:02d}:{minute:02d} horas. "
         f"Recibirás tu primera pregunta en el próximo horario programado. "
         f"¡Gracias por suscribirte!"
     )
@@ -237,7 +248,16 @@ async def handle_hour_selection(db: Session, user: User, message: Dict[str, Any]
         message_text=confirmation_msg
     )
     
-    return {"status": "success", "action": "processed_hour", "selected_hour": hour}
+    # Schedule the first question confirmation
+    from .scheduler import schedule_next_question
+    next_time = schedule_next_question(user, db)
+    
+    return {
+        "status": "success", 
+        "action": "processed_hour", 
+        "selected_time": f"{hour:02d}:{minute:02d}", # Return full time
+        "next_scheduled": next_time.isoformat() if next_time else None
+    }
 
 async def handle_question_confirmation(db: Session, user: User, message: Dict[str, Any]) -> Dict[str, Any]:
     """
@@ -268,7 +288,7 @@ async def handle_question_confirmation(db: Session, user: User, message: Dict[st
             user_response = payload.lower()
     
     # Handle the confirmation response
-    if user_response in ["quiero repasar", "sí", "si", "yes", "aceptar"]:
+    if user_response in ["listo", "sí", "si", "yes", "aceptar", "Estoy", "estoy"]:
         logger.info(f"User {from_number} confirmed to receive a question")
         
         # Import here to avoid circular import
@@ -279,7 +299,7 @@ async def handle_question_confirmation(db: Session, user: User, message: Dict[st
         
         return {"status": "success", "action": "sending_question"}
     
-    elif user_response in ["no quiero repasar", "no", "rechazar"]:
+    elif user_response in ["Hoy no quiero repasar", "no", "rechazar"]:
         logger.info(f"User {from_number} declined to receive a question")
         
         # Update user state back to subscribed

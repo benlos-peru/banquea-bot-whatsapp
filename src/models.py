@@ -19,10 +19,11 @@ class User(Base):
     phone_number = Column(String, unique=True, index=True)
     username = Column(String)
     scheduled_hour = Column(Integer)  # 0-23
+    scheduled_minute = Column(Integer, default=0) # 0-59, Add default
     scheduled_day_of_week = Column(Integer)  # 0-6 (Monday-Sunday)
-    whatsapp_id = Column(String, unique=True)
+    whatsapp_id = Column(String, unique=True, nullable=True) # Allow nullable initially
     state = Column(Integer, default=UserState.UNCONTACTED)
-    next_question_at = Column(DateTime, nullable=True)
+    # next_question_at = Column(DateTime, nullable=True) # Can be removed if using APScheduler jobs
     last_interaction_at = Column(DateTime, default=datetime.utcnow)
     
     # Relationship to track questions sent to this user
