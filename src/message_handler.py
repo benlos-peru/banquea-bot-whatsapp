@@ -174,7 +174,7 @@ async def handle_day_selection(db: Session, user: User, message: Dict[str, Any])
     # Send hour selection template
     success = await whatsapp_client.send_template_message(
         to_number=from_number,
-        template_name="seleccion_hora"
+        template_name="seleccion_hora_minuto"
     )
     
     if not success:
