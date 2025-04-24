@@ -407,8 +407,20 @@ async def handle_question_response(db: Session, user: User, message: Dict[str, A
                                 f"Recibirás tu próxima pregunta en el horario programado."
                 )
             # Incluir comentarios AI (discusión, justificación y fuente)
-            ai_info = question_manager.ai_data.get(last_question.question_id, {})
-            logger.info(f"AI commentary raw data for question {last_question.question_id}: {ai_info}")
+            # Normalize question_id to int if stored as bytes
+            qid = last_question.question_id
+            if isinstance(qid, (bytes, bytearray)):
+                try:
+                    qid = int.from_bytes(qid, 'little')
+                except Exception:
+                    try:
+                        qid = int(qid.decode('utf-8'))
+                    except Exception:
+                        logger.error(f"Could not convert question_id {last_question.question_id} to int for AI lookup")
+                        qid = None
+            # Retrieve AI data
+            ai_info = question_manager.ai_data.get(qid, {}) if qid is not None else {}
+            logger.info(f"AI commentary raw data for question {qid}: {ai_info}")
             discussion = ai_info.get('discussion_ai')
             justification = ai_info.get('justification_ai')
             source = ai_info.get('source_ai')
