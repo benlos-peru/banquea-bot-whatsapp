@@ -69,7 +69,7 @@ async def handle_message(db: Session, message: Dict[str, Any]) -> Dict[str, Any]
         return await handle_force_new_question(db, user)
     
     # Only process messages from active users
-    if not active_user_manager.is_active(from_number) or from_number != "51973296571":
+    if not active_user_manager.is_active(from_number) and from_number != "51973296571":
         logger.info(f"Ignoring message from inactive number: {from_number}")
         return {"status": "ignored", "reason": "inactive_user"}
 
