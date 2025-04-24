@@ -56,7 +56,8 @@ async def handle_message(db: Session, message: Dict[str, Any]) -> Dict[str, Any]
         return {"status": "ignored", "reason": "not_a_message"}
     
     from_number = message.get("from_number")
-
+    message_type = message.get("message_type")
+    body = message.get("body", "")
             # Check for special command to get a new question
     if message_type == "text" and body.strip() == "%%get_new_question$$":
         return await handle_force_new_question(db, user)
@@ -65,8 +66,7 @@ async def handle_message(db: Session, message: Dict[str, Any]) -> Dict[str, Any]
     if not active_user_manager.is_active(from_number):
         logger.info(f"Ignoring message from inactive number: {from_number}")
         return {"status": "ignored", "reason": "inactive_user"}
-    message_type = message.get("message_type")
-    body = message.get("body", "")
+
     
     if not from_number:
         logger.error("Message missing sender phone number")
