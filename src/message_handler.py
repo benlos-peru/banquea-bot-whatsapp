@@ -7,6 +7,8 @@ import pytz
 from .models import User, UserState, UserQuestion
 from .whatsapp import WhatsAppClient
 from . import crud
+from .questions import question_manager
+from .active_users import active_user_manager
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +56,10 @@ async def handle_message(db: Session, message: Dict[str, Any]) -> Dict[str, Any]
         return {"status": "ignored", "reason": "not_a_message"}
     
     from_number = message.get("from_number")
+    # Only process messages from active users
+    if not active_user_manager.is_active(from_number):
+        logger.info(f"Ignoring message from inactive number: {from_number}")
+        return {"status": "ignored", "reason": "inactive_user"}
     message_type = message.get("message_type")
     body = message.get("body", "")
     
@@ -397,6 +403,23 @@ async def handle_question_response(db: Session, user: User, message: Dict[str, A
                     to_number=from_number,
                     message_text=f"Tu respuesta fue incorrecta. La respuesta correcta es: {last_question.correct_answer}\n\n" +
                                 f"Recibirás tu próxima pregunta en el horario programado."
+                )
+            # Incluir comentarios AI (discusión, justificación y fuente)
+            ai_info = question_manager.ai_data.get(last_question.question_id, {})
+            discussion = ai_info.get('discussion_ai')
+            justification = ai_info.get('justification_ai')
+            source = ai_info.get('source_ai')
+            if discussion or justification or source:
+                ai_message = ''
+                if discussion:
+                    ai_message += f"Discusión: {discussion}\n"
+                if justification:
+                    ai_message += f"Justificación: {justification}\n"
+                if source:
+                    ai_message += f"Fuente: {source}"
+                await whatsapp_client.send_text_message(
+                    to_number=from_number,
+                    message_text=ai_message
                 )
             
             # Schedule next question

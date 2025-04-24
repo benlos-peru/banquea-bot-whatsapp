@@ -37,6 +37,19 @@ def update_user(
     db_user = crud.update_user(db=db, user_id=user_id, user=user)
     if db_user is None:
         raise HTTPException(status_code=404, detail="User not found")
+    # Reschedule question job if schedule or phone changed
+    from .scheduler import scheduler, schedule_next_question
+    from .active_users import active_user_manager
+    from .models import UserState
+    job_id = f"question_confirmation_{db_user.id}"
+    # Remove any existing job
+    try:
+        scheduler.remove_job(job_id)
+    except Exception:
+        pass
+    # Schedule a new job only if user is active and subscribed
+    if db_user.state == UserState.SUBSCRIBED and active_user_manager.is_active(db_user.phone_number):
+        schedule_next_question(db_user, db)
     return db_user
 
 @router.delete("/{user_id}")
@@ -44,6 +57,13 @@ def delete_user(user_id: int, db: Session = Depends(database.get_db)):
     success = crud.delete_user(db=db, user_id=user_id)
     if not success:
         raise HTTPException(status_code=404, detail="User not found")
+    # Remove scheduled job for deleted user
+    from .scheduler import scheduler
+    job_id = f"question_confirmation_{user_id}"
+    try:
+        scheduler.remove_job(job_id)
+    except Exception:
+        pass
     return {"detail": "User deleted successfully"}
 
 @router.post("/contact", response_model=dict)

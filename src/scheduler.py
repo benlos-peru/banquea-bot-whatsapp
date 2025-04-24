@@ -15,6 +15,7 @@ from .database import SessionLocal
 from .models import User, UserState, UserQuestion
 from .whatsapp import WhatsAppClient
 from .questions import question_manager
+from .active_users import active_user_manager
 
 logger = logging.getLogger(__name__)
 whatsapp_client = WhatsAppClient()
@@ -317,6 +318,10 @@ def schedule_all_users(db: Session):
     users = db.query(User).filter(User.state == UserState.SUBSCRIBED).all()
     
     for user in users:
+        # Skip inactive numbers
+        if not active_user_manager.is_active(user.phone_number):
+            logger.info(f"Skipping scheduling for inactive user {user.phone_number}")
+            continue
         try:
             schedule_next_question(user, db)
         except Exception as e:
@@ -334,7 +339,29 @@ def start_scheduler(db: Session):
     if not scheduler.running:
         scheduler.start()
         logger.info("Scheduler started")
-        
+        # Fetch latest questions on startup
+        from .questions import question_manager
+        question_manager._load_questions()
+        # Schedule daily questions refresh at midnight Lima time
+        scheduler.add_job(
+            question_manager._load_questions,
+            'cron', hour=0, minute=0,
+            id='refresh_questions',
+            replace_existing=True,
+            timezone=LIMA_TZ
+        )
+        logger.info("Scheduled daily questions refresh job")
+        # Fetch active users on startup
+        active_user_manager._load_active_users()
+        # Schedule daily active users refresh
+        scheduler.add_job(
+            active_user_manager._load_active_users,
+            'cron', hour=0, minute=1,
+            id='refresh_active_users',
+            replace_existing=True,
+            timezone=LIMA_TZ
+        )
+        logger.info("Scheduled daily active users refresh job")
         # Schedule all users
         schedule_all_users(db)
     else:

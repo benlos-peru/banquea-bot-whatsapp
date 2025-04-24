@@ -245,7 +245,7 @@ class WhatsAppClient:
         endpoint = f"{self.api_url}/{self.phone_number_id}/messages"
         headers = {
             "Authorization": f"Bearer {self.access_token}",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json; charset=UTF-8"
         }
         
         payload = {
@@ -261,7 +261,9 @@ class WhatsAppClient:
         
         try:
             logger.info(f"Sending text message to {to_number}: {message_text[:50]}...")
-            response = requests.post(endpoint, headers=headers, json=payload)
+            # Serialize payload preserving Unicode
+            payload_str = json.dumps(payload, ensure_ascii=False).encode('utf-8')
+            response = requests.post(endpoint, headers=headers, data=payload_str)
             response_data = response.json()
             
             if response.status_code == 200:
@@ -291,7 +293,7 @@ class WhatsAppClient:
         endpoint = f"{self.api_url}/{self.phone_number_id}/messages"
         headers = {
             "Authorization": f"Bearer {self.access_token}",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json; charset=UTF-8"
         }
         
         template_data = {
@@ -314,7 +316,8 @@ class WhatsAppClient:
         
         try:
             logger.info(f"Sending template message '{template_name}' to {to_number}")
-            response = requests.post(endpoint, headers=headers, json=payload)
+            payload_str = json.dumps(payload, ensure_ascii=False).encode('utf-8')
+            response = requests.post(endpoint, headers=headers, data=payload_str)
             response_data = response.json()
             
             if response.status_code == 200:
@@ -346,7 +349,7 @@ class WhatsAppClient:
         endpoint = f"{self.api_url}/{self.phone_number_id}/messages"
         headers = {
             "Authorization": f"Bearer {self.access_token}",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json; charset=UTF-8"
         }
         
         payload = {
@@ -375,7 +378,8 @@ class WhatsAppClient:
         
         try:
             logger.info(f"Sending interactive list message to {to_number}")
-            response = requests.post(endpoint, headers=headers, json=payload)
+            payload_str = json.dumps(payload, ensure_ascii=False).encode('utf-8')
+            response = requests.post(endpoint, headers=headers, data=payload_str)
             response_data = response.json()
             
             if response.status_code == 200:
