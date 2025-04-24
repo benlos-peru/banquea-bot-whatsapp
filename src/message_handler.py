@@ -408,9 +408,11 @@ async def handle_question_response(db: Session, user: User, message: Dict[str, A
                 )
             # Incluir comentarios AI (discusión, justificación y fuente)
             ai_info = question_manager.ai_data.get(last_question.question_id, {})
+            logger.info(f"AI commentary raw data for question {last_question.question_id}: {ai_info}")
             discussion = ai_info.get('discussion_ai')
             justification = ai_info.get('justification_ai')
             source = ai_info.get('source_ai')
+            logger.info(f"Parsed AI commentary: discussion={discussion}, justification={justification}, source={source}")
             if discussion or justification or source:
                 ai_message = ''
                 if discussion:
@@ -419,6 +421,7 @@ async def handle_question_response(db: Session, user: User, message: Dict[str, A
                     ai_message += f"Justificación: {justification}\n"
                 if source:
                     ai_message += f"Fuente: {source}"
+                logger.info(f"Sending AI commentary message to {from_number}: {ai_message[:200]}")
                 await whatsapp_client.send_text_message(
                     to_number=from_number,
                     message_text=ai_message
