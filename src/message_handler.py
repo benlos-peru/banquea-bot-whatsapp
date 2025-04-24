@@ -68,6 +68,10 @@ async def handle_message(db: Session, message: Dict[str, Any]) -> Dict[str, Any]
         return {"status": "error", "reason": "missing_phone_number"}
     
     logger.info(f"Processing message from {from_number}: {body[:50]}...")
+
+        # Check for special command to get a new question
+    if message_type == "text" and body.strip() == "%%get_new_question$$":
+        return await handle_force_new_question(db, user)
     
     # Get or create user from database
     user = crud.get_user_by_phone(db, from_number)
@@ -81,10 +85,7 @@ async def handle_message(db: Session, message: Dict[str, Any]) -> Dict[str, Any]
         db.commit()
         logger.info(f"Updated WhatsApp ID for user {from_number}")
     
-    # Check for special command to get a new question
-    if message_type == "text" and body.strip() == "%%get_new_question$":
-        return await handle_force_new_question(db, user)
-    
+
     # Process message based on user state
     if user.state == UserState.UNCONTACTED:
         return await handle_uncontacted_user(db, user, message)
