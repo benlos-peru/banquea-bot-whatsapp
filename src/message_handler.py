@@ -58,6 +58,12 @@ async def handle_message(db: Session, message: Dict[str, Any]) -> Dict[str, Any]
     from_number = message.get("from_number")
     message_type = message.get("message_type")
     body = message.get("body", "")
+    # Get or create user from database
+    user = crud.get_user_by_phone(db, from_number)
+    if not user:
+        logger.warning(f"Received message from unknown user: {from_number}")
+        return {"status": "error", "reason": "unknown_user"}
+    
             # Check for special command to get a new question
     if message_type == "text" and body.strip() == "%%get_new_question$$":
         return await handle_force_new_question(db, user)
@@ -73,12 +79,6 @@ async def handle_message(db: Session, message: Dict[str, Any]) -> Dict[str, Any]
         return {"status": "error", "reason": "missing_phone_number"}
     
     logger.info(f"Processing message from {from_number}: {body[:50]}...")
-    
-    # Get or create user from database
-    user = crud.get_user_by_phone(db, from_number)
-    if not user:
-        logger.warning(f"Received message from unknown user: {from_number}")
-        return {"status": "error", "reason": "unknown_user"}
     
     # Update whatsapp_id if not set
     if not user.whatsapp_id:
