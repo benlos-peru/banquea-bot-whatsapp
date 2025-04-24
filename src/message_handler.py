@@ -15,6 +15,32 @@ logger = logging.getLogger(__name__)
 # Create WhatsApp client instance
 whatsapp_client = WhatsAppClient()
 
+def format_ai_commentary(discussion: str = None, justification: str = None, source: str = None) -> str:
+    """
+    Build a well-formatted AI commentary message with bullets and sections.
+    """
+    lines = []
+    # Discussion section with bullet points
+    if discussion:
+        lines.append("Discusión:")
+        for item in discussion.split("|"):
+            text = item.strip()
+            if text:
+                lines.append(f"• {text}")
+    # Justification section as paragraph
+    if justification:
+        lines.append("")
+        lines.append("Justificación:")
+        for para in justification.split("\n"):
+            p = para.strip()
+            if p:
+                lines.append(p)
+    # Source at end
+    if source:
+        lines.append("")
+        lines.append(f"Fuente: {source.strip()}")
+    return "\n".join(lines)
+
 # Spanish day name to numeric day of week mapping (0 = Monday, 6 = Sunday)
 DAY_MAPPING = {
     "Lunes": 0,
@@ -426,17 +452,12 @@ async def handle_question_response(db: Session, user: User, message: Dict[str, A
             source = ai_info.get('source_ai')
             logger.info(f"Parsed AI commentary: discussion={discussion}, justification={justification}, source={source}")
             if discussion or justification or source:
-                ai_message = ''
-                if discussion:
-                    ai_message += f"Discusión: {discussion}\n"
-                if justification:
-                    ai_message += f"Justificación: {justification}\n"
-                if source:
-                    ai_message += f"Fuente: {source}"
-                logger.info(f"Sending AI commentary message to {from_number}: {ai_message[:200]}")
+                # Use helper to format AI commentary
+                ai_text = format_ai_commentary(discussion, justification, source)
+                logger.info(f"Sending formatted AI commentary to {from_number}: {ai_text[:200]}")
                 await whatsapp_client.send_text_message(
                     to_number=from_number,
-                    message_text=ai_message
+                    message_text=ai_text
                 )
             
             # Schedule next question
