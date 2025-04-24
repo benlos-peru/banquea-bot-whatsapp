@@ -17,7 +17,7 @@ class QuestionManager:
         """Fetch all questions from external API into memory"""
         try:
             # Query external API endpoint
-            response = httpx.get("https://enam.pe/api/statistics/qanda", timeout=10)
+            response = httpx.get("https://enarm.pe/api/statistics/qanda", timeout=10)
             response.raise_for_status()
             payload = response.json()
             data = payload.get('data', []) or []

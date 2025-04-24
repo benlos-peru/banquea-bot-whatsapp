@@ -14,7 +14,7 @@ class ActiveUserManager:
     def _load_active_users(self):
         """Fetch active users list from API and store phone numbers"""
         try:
-            response = httpx.get("https://enam.pe/api/statistics/aienam", timeout=10)
+            response = httpx.get("https://enarm.pe/api/statistics/aienam", timeout=10)
             response.raise_for_status()
             payload = response.json()
             data = payload.get('data', []) or []
