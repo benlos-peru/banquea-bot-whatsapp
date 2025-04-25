@@ -16,6 +16,9 @@ from .models import User, UserState, UserQuestion
 from .whatsapp import WhatsAppClient
 from .questions import question_manager
 from .active_users import active_user_manager
+# Import the handler for uncontacted users
+from .message_handler import handle_uncontacted_user 
+import asyncio # Import asyncio for delays
 
 logger = logging.getLogger(__name__)
 whatsapp_client = WhatsAppClient()
@@ -307,6 +310,64 @@ def schedule_next_question(user: User, db: Session):
     
     return next_run_time
 
+async def contact_uncontacted_users_job():
+    """
+    Scheduled job to contact all users currently in the UNCONTACTED state.
+    Reuses logic from the /users/contact endpoint.
+    Creates its own database session.
+    """
+    logger.info("Job started: Contacting uncontacted users")
+    success_count = 0
+    failed_count = 0
+    skipped_inactive = 0
+    processed_count = 0
+    
+    try:
+        with SessionLocal() as db: # Create a new session for this job
+            # Get all users in UNCONTACTED state (no limit for the job)
+            uncontacted_users = db.query(User).filter(User.state == UserState.UNCONTACTED).all()
+            processed_count = len(uncontacted_users)
+
+            if not uncontacted_users:
+                logger.info("No users found in UNCONTACTED state.")
+                return
+
+            logger.info(f"Found {processed_count} users in UNCONTACTED state. Checking activity and contacting...")
+
+            for user in uncontacted_users:
+                # Check if user is active before contacting
+                if not active_user_manager.is_active(user.phone_number):
+                    logger.info(f"Skipping contact for inactive uncontacted user: {user.phone_number}")
+                    skipped_inactive += 1
+                    continue # Skip to the next user
+                
+                try:
+                    # Reuse the handler function used by the route
+                    # Pass the user object and an empty dict for message context
+                    contact_result = await handle_uncontacted_user(db, user, {}) 
+                    
+                    # Check the result status (handle_uncontacted_user manages state changes)
+                    if contact_result.get("status") == "success":
+                        success_count += 1
+                        logger.debug(f"Successfully contacted uncontacted user: {user.phone_number}")
+                    else:
+                        failed_count += 1
+                        logger.warning(f"Failed to contact uncontacted user {user.phone_number}: {contact_result.get('reason', 'unknown')}")
+                    
+                    # Small delay between users to avoid rate limiting
+                    await asyncio.sleep(1) 
+                    
+                except Exception as e:
+                    # Log error for this specific user but continue with others
+                    logger.error(f"Error contacting uncontacted user {user.phone_number}: {str(e)}", exc_info=True)
+                    failed_count += 1
+        
+        logger.info(f"Finished contacting uncontacted users. Total processed: {processed_count}, Success: {success_count}, Failed: {failed_count}, Skipped (inactive): {skipped_inactive}")
+
+    except Exception as e:
+        logger.error(f"Critical error in contact_uncontacted_users_job: {e}", exc_info=True)
+
+
 def schedule_all_users(db: Session):
     """
     Schedule questions for all subscribed users.
@@ -331,39 +392,68 @@ def schedule_all_users(db: Session):
 
 def start_scheduler(db: Session):
     """
-    Start the scheduler and schedule all users.
+    Start the scheduler, schedule daily refreshes, and the initial contact jobs.
     
     Args:
-        db: Database session
+        db: Database session (used only for initial setup if needed, jobs manage their own sessions)
     """
     if not scheduler.running:
         scheduler.start()
         logger.info("Scheduler started")
-        # Fetch latest questions on startup
+        
+        # Fetch latest questions on startup (run once immediately)
         from .questions import question_manager
+        logger.info("Performing initial question load on startup...")
         question_manager._load_questions()
-        # Schedule daily questions refresh at midnight Lima time
+        
+        # Schedule daily questions refresh at MIDDAY Lima time
         scheduler.add_job(
             question_manager._load_questions,
-            'cron', hour=0, minute=0,
+            'cron', 
+            hour=12, # Midday
+            minute=0, 
             id='refresh_questions',
             replace_existing=True,
-            timezone=LIMA_TZ
+            timezone=LIMA_TZ,
+            misfire_grace_time=1800 # Allow 30 mins late run
         )
-        logger.info("Scheduled daily questions refresh job")
-        # Fetch active users on startup
+        logger.info("Scheduled daily questions refresh job for 12:00 PM Lima time")
+        
+        # Fetch active users on startup (run once immediately)
+        logger.info("Performing initial active user load on startup...")
         active_user_manager._load_active_users()
-        # Schedule daily active users refresh
+        
+        # Schedule daily active users refresh at MIDDAY Lima time
         scheduler.add_job(
             active_user_manager._load_active_users,
-            'cron', hour=0, minute=1,
+            'cron', 
+            hour=12, # Midday
+            minute=1, # Run shortly after question refresh
             id='refresh_active_users',
             replace_existing=True,
-            timezone=LIMA_TZ
+            timezone=LIMA_TZ,
+            misfire_grace_time=1800 # Allow 30 mins late run
         )
-        logger.info("Scheduled daily active users refresh job")
-        # Schedule all users
-        schedule_all_users(db)
+        logger.info("Scheduled daily active users refresh job for 12:01 PM Lima time")
+
+        # Schedule the job to contact all UNCONTACTED users after refreshes
+        scheduler.add_job(
+            contact_uncontacted_users_job, # New async function
+            'cron',
+            hour=12, # Run after refreshes
+            minute=5, # Adjusted timing: Run 5 mins after refreshes
+            id='contact_uncontacted_users', # Keep this ID
+            replace_existing=True,
+            timezone=LIMA_TZ,
+            misfire_grace_time=1800 # Allow 30 mins late run
+        )
+        logger.info("Scheduled daily job to contact UNCONTACTED users for 12:05 PM Lima time")
+
+        # NOTE: Removed schedule_all_users(db) call from startup.
+        # Initial contact for SUBSCRIBED users is handled by 'contact_subscribed_users'.
+        # Initial contact for UNCONTACTED users is handled by 'contact_uncontacted_users'.
+        # Subsequent scheduling happens based on user interactions.
+        
     else:
         logger.warning("Scheduler already running")
 

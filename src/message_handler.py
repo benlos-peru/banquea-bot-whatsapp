@@ -90,12 +90,15 @@ async def handle_message(db: Session, message: Dict[str, Any]) -> Dict[str, Any]
         logger.warning(f"Received message from unknown user: {from_number}")
         return {"status": "error", "reason": "unknown_user"}
     
-            # Check for special command to get a new question
+    logger.debug(f"User found: ID={user.id}, State={user.state}") # Add user state debug log
+
+    # Check for special command to get a new question
     if message_type == "text" and body.strip() == "%%get_new_question$$":
         return await handle_force_new_question(db, user)
     
     # Only process messages from active users
-    if not active_user_manager.is_active(from_number) and from_number != "51973296571":
+    logger.debug(f"Checking active status for number: {from_number}") # Log number before check
+    if not active_user_manager.is_active(from_number) and from_number != "51973296571": # Allow test number
         logger.info(f"Ignoring message from inactive number: {from_number}")
         return {"status": "ignored", "reason": "inactive_user"}
 
