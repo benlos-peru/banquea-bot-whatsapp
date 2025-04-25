@@ -6,16 +6,18 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 # Add src directory to sys.path to allow imports
-project_root = Path(__file__).parent
-src_path = project_root / 'src'
-sys.path.insert(0, str(src_path))
+# project_root = Path(__file__).parent
+# src_path = project_root / 'src'
+# sys.path.insert(0, str(src_path)) # No longer needed if using src. imports
 
-from database import SessionLocal, engine
-from models import Base, UserState
-from schemas import UserCreate
-import crud
+# Use imports relative to the project root, assuming src is a package
+from src.database import SessionLocal, engine
+from src.models import Base, UserState
+from src.schemas import UserCreate, UserUpdate # Import UserUpdate
+from src import crud # Import crud as part of the src package
 
 # Load environment variables (if needed, e.g., for DB connection)
+project_root = Path(__file__).parent # Define project_root for dotenv
 load_dotenv(project_root / '.env')
 
 # Configure logging
@@ -60,6 +62,7 @@ async def fetch_users_from_api():
     except Exception as e:
         logger.error(f"An unexpected error occurred during API fetch: {e}")
         return []
+
 
 async def populate_database():
     """Fetch users from API and add or update them in the database."""
@@ -112,7 +115,7 @@ async def populate_database():
                 # Update existing user if name differs
                 if existing_user.username != name:
                     logger.info(f"Updating user {normalized_phone}: Name change from '{existing_user.username}' to '{name}'")
-                    update_data = schemas.UserUpdate(username=name)
+                    update_data = UserUpdate(username=name) # Use UserUpdate directly
                     try:
                         crud.update_user(db=db, user_id=existing_user.id, user=update_data)
                         updated_count += 1
@@ -126,7 +129,7 @@ async def populate_database():
             else:
                 # Create new user
                 logger.info(f"Adding new user: Name='{name}', Phone='{normalized_phone}'")
-                user_data = UserCreate(
+                user_data = UserCreate( # Use UserCreate directly
                     phone_number=normalized_phone,
                     username=name,
                     # Default schedule details (not important for UNCONTACTED state)
@@ -148,6 +151,16 @@ async def populate_database():
         logger.info("Finished user population.")
         logger.info(f"Summary: Added={added_count}, Updated={updated_count}, Skipped (no change)={skipped_count}, Errors/Invalid={error_count}")
 
+
 if __name__ == "__main__":
     import asyncio
+    # Ensure database tables exist before running
+    # This might be better handled elsewhere, but ensures the script can run standalone
+    try:
+        Base.metadata.create_all(bind=engine)
+        logger.info("Database tables checked/created.")
+    except Exception as e:
+        logger.error(f"Failed to check/create database tables: {e}")
+        sys.exit(1) # Exit if DB setup fails
+
     asyncio.run(populate_database())
