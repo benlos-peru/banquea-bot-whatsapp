@@ -62,7 +62,7 @@ async def fetch_users_from_api():
         return []
 
 async def populate_database():
-    """Fetch users from API and add new ones to the database."""
+    """Fetch users from API and add or update them in the database."""
     logger.info("Starting user population script...")
     
     # Ensure database tables are created (optional, usually handled by main app)
@@ -74,6 +74,7 @@ async def populate_database():
         return
 
     added_count = 0
+    updated_count = 0
     skipped_count = 0
     error_count = 0
     
@@ -85,6 +86,8 @@ async def populate_database():
         for api_user in api_users:
             raw_phone = api_user.get("phone")
             name = api_user.get("name")
+            # Potentially other fields like plan_id if needed
+            # plan_id = api_user.get("plan_id") 
 
             if not raw_phone or not name:
                 logger.warning(f"Skipping record due to missing phone or name: {api_user}")
@@ -106,8 +109,20 @@ async def populate_database():
             existing_user = crud.get_user_by_phone(db, phone_number=normalized_phone)
             
             if existing_user:
-                # logger.info(f"User with phone {normalized_phone} already exists. Skipping.")
-                skipped_count += 1
+                # Update existing user if name differs
+                if existing_user.username != name:
+                    logger.info(f"Updating user {normalized_phone}: Name change from '{existing_user.username}' to '{name}'")
+                    update_data = schemas.UserUpdate(username=name)
+                    try:
+                        crud.update_user(db=db, user_id=existing_user.id, user=update_data)
+                        updated_count += 1
+                    except Exception as e:
+                        logger.error(f"Failed to update user {normalized_phone} ('{name}'): {e}")
+                        error_count += 1
+                        db.rollback()
+                else:
+                    # logger.info(f"User with phone {normalized_phone} already exists and name matches. Skipping.")
+                    skipped_count += 1
             else:
                 # Create new user
                 logger.info(f"Adding new user: Name='{name}', Phone='{normalized_phone}'")
@@ -131,7 +146,7 @@ async def populate_database():
     finally:
         db.close()
         logger.info("Finished user population.")
-        logger.info(f"Summary: Added={added_count}, Skipped (already exist)={skipped_count}, Errors/Invalid={error_count}")
+        logger.info(f"Summary: Added={added_count}, Updated={updated_count}, Skipped (no change)={skipped_count}, Errors/Invalid={error_count}")
 
 if __name__ == "__main__":
     import asyncio

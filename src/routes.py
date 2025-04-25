@@ -1,7 +1,10 @@
+import logging
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from typing import List
 from . import crud, schemas, database
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -84,6 +87,7 @@ async def contact_users(
     """
     from .message_handler import whatsapp_client, handle_uncontacted_user
     from .models import UserState
+    from .active_users import active_user_manager # Import active user manager
     import asyncio
     
     # Get users in UNCONTACTED state
@@ -96,38 +100,50 @@ async def contact_users(
     
     success_count = 0
     failed_count = 0
+    skipped_inactive = 0 # Counter for skipped inactive users
     results = []
     
     # Contact each user
     for user in users:
+        # Check if user is active before contacting
+        if not active_user_manager.is_active(user.phone_number):
+            logger.info(f"Skipping contact for inactive user: {user.phone_number}")
+            results.append({
+                "phone_number": user.phone_number,
+                "status": "skipped",
+                "reason": "inactive_user"
+            })
+            skipped_inactive += 1
+            continue # Skip to the next user
+            
         try:
             # Use the handle_uncontacted_user method to manage user contact
-            contact_result = await handle_uncontacted_user(db, user, {"phone_number": user.phone_number})
+            # Pass the user object directly
+            contact_result = await handle_uncontacted_user(db, user, {})
             
-            if not contact_result["success"]:
+            # handle_uncontacted_user now manages state changes internally
+            # Check the result status
+            if contact_result.get("status") == "success":
+                 results.append({
+                    "phone_number": user.phone_number,
+                    "status": "success"
+                })
+                 success_count += 1
+            else:
                 results.append({
                     "phone_number": user.phone_number,
                     "status": "failed",
                     "reason": contact_result.get("reason", "unknown_error")
                 })
                 failed_count += 1
-                continue
-            
-            # Update user state
-            user.state = UserState.AWAITING_DAY
-            db.commit()
-            
-            results.append({
-                "phone_number": user.phone_number,
-                "status": "success"
-            })
-            success_count += 1
             
             # Small delay between users
-            await asyncio.sleep(2)
+            await asyncio.sleep(1) # Reduced delay slightly
             
         except Exception as e:
-            db.rollback()
+            # Rollback might not be needed if handle_uncontacted_user handles its own session/errors
+            # db.rollback() 
+            logger.error(f"Error contacting user {user.phone_number}: {str(e)}", exc_info=True)
             results.append({
                 "phone_number": user.phone_number,
                 "status": "error",
@@ -137,8 +153,10 @@ async def contact_users(
     
     return {
         "status": "completed",
-        "total": len(users),
+        "total_processed": len(users),
+        "contact_attempts": success_count + failed_count,
         "success": success_count,
         "failed": failed_count,
+        "skipped_inactive": skipped_inactive,
         "results": results
     }
