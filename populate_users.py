@@ -24,7 +24,7 @@ load_dotenv(project_root / '.env')
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-API_ENDPOINT = "https://enarm.pe/api/statistics/aienam" # Endpoint for users
+API_ENDPOINT = "https://enam.pe/api/statistics/aienam" # Endpoint for users
 
 def normalize_phone_number(phone: str) -> str:
     """Ensure phone number starts with '51' prefix."""
