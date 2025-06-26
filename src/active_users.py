@@ -16,7 +16,7 @@ class ActiveUserManager:
         """Fetch active users list from API and store phone numbers"""
         try:
             logger.debug("Fetching active users from API...")
-            response = httpx.get("https://enarm.pe/api/statistics/aienam", timeout=10)
+            response = httpx.get("https://enam.pe/api/statistics/aienam", timeout=10)
             response.raise_for_status()
             payload = response.json()
             # Log raw payload (or part of it) for debugging
